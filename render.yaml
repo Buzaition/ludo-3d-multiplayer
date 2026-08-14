@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ludo-3d-multiplayer
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: production

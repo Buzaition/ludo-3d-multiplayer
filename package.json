@@ -1,0 +1,21 @@
+{
+  "name": "ludo-3d-multiplayer",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Deploy-ready server-authoritative realtime 3D Ludo MVP with Socket.IO rooms, bots, reconnect and sync protection",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js",
+    "test": "node --test tests/*.test.js",
+    "check": "node --check client/app.js && node --check server/server.js && node --check server/game/GameEngine.js && node --check server/rooms/RoomManager.js && node --check server/socket/socketHandlers.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "three": "^0.169.0"
+  }
+}

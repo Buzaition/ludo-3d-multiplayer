@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1015" />
+  <title>Ludo 3D — Multiplayer</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/three/build/three.module.js",
+      "three/addons/": "/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body class="not-playing">
+  <div id="app">
+    <canvas id="gameCanvas" aria-label="لوحة لودو ثلاثية الأبعاد"></canvas>
+
+    <header class="topbar glass">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <div>
+          <strong>LUDO 3D</strong>
+          <small id="connectionText">Multiplayer • جاري الاتصال…</small>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="playAgainBtn" class="ghost-btn" hidden>العب تاني</button>
+        <button id="helpBtn" class="ghost-btn">طريقة اللعب</button>
+      </div>
+    </header>
+
+    <div class="hud-stack" id="hudStack">
+      <aside class="players-panel glass" id="playersPanel" aria-label="اللاعبون"></aside>
+
+      <section class="game-panel glass" id="gamePanel">
+        <div class="dice-zone">
+          <div class="turn-row">
+            <div>
+              <small>الدور الحالي</small>
+              <div id="turnName" class="turn-name">—</div>
+            </div>
+            <div id="turnSwatch" class="turn-swatch" aria-hidden="true"></div>
+          </div>
+
+          <div class="dice-info-row">
+            <div id="diceFace" class="dice-face" data-value="1" aria-label="قيمة النرد 1">
+              <span class="pip p1"></span><span class="pip p2"></span><span class="pip p3"></span>
+              <span class="pip p4"></span><span class="pip p5"></span><span class="pip p6"></span>
+              <span class="pip p7"></span>
+            </div>
+            <div class="dice-copy">
+              <strong id="statusText">مستني بداية اللعبة</strong>
+              <small id="subStatus">السيرفر هو المسؤول عن النرد والحركات.</small>
+            </div>
+          </div>
+
+          <button id="rollBtn" class="primary-btn" disabled>🎲 ارمي النرد</button>
+          <div id="pieceButtons" class="piece-buttons" aria-label="اختيار قطعة"></div>
+        </div>
+      </section>
+
+      <section class="camera-panel glass" id="cameraPanel">
+        <div class="camera-title">
+          <span>منظور اللاعب</span>
+          <label class="toggle">
+            <input id="autoCamera" type="checkbox" checked />
+            <span>كاميرا تلقائية</span>
+          </label>
+        </div>
+        <div class="camera-buttons">
+          <button data-view="RED">أحمر</button>
+          <button data-view="GREEN">أخضر</button>
+          <button data-view="YELLOW">أصفر</button>
+          <button data-view="BLUE">أزرق</button>
+          <button data-view="FREE">حر</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="networkOverlay" class="network-overlay" hidden>
+      <section id="homeScreen" class="network-card glass">
+        <div class="network-logo"><span class="brand-dot"></span> LUDO 3D</div>
+        <h1>العب مع صحابك</h1>
+        <p>اعمل روم أو ادخل بكود روم موجود.</p>
+        <label class="field-label" for="nameInput">اسمك</label>
+        <input id="nameInput" class="network-input" maxlength="24" autocomplete="nickname" placeholder="مثلاً Mostafa" />
+        <button id="createRoomBtn" class="primary-btn">إنشاء روم</button>
+        <div class="network-divider"><span>أو</span></div>
+        <div class="join-row">
+          <input id="roomCodeInput" class="network-input room-code-input" maxlength="6" autocomplete="off" placeholder="ROOM CODE" />
+          <button id="joinRoomBtn" class="ghost-btn">دخول</button>
+        </div>
+        <small class="network-hint">كل روم = 4 لاعبين. لو العدد ناقص بعد دقيقة، صاحب الروم يقدر يكمل ببوتات.</small>
+      </section>
+
+      <section id="lobbyScreen" class="network-card glass" hidden>
+        <div class="lobby-head">
+          <div>
+            <small>ROOM CODE</small>
+            <button id="copyRoomBtn" class="room-code-display" title="نسخ الكود">------</button>
+          </div>
+          <button id="leaveRoomBtn" class="ghost-btn compact">خروج</button>
+        </div>
+        <h2>مستنيين اللاعبين</h2>
+        <div id="lobbyPlayers" class="lobby-players"></div>
+        <div class="lobby-timer">
+          <span>وقت الانتظار</span>
+          <strong id="waitingTimer">01:00</strong>
+        </div>
+        <button id="fillBotsBtn" class="primary-btn" disabled>كمّل ببوتات 🤖</button>
+        <small id="lobbyHint" class="network-hint">لما الأربع أماكن تكتمل، اللعبة هتبدأ تلقائيًا.</small>
+      </section>
+    </div>
+
+    <div id="loading" class="loading-screen">
+      <div class="splash-dice-wrap" aria-hidden="true">
+        <div class="splash-dice">
+          <div class="splash-face splash-front"><i></i></div>
+          <div class="splash-face splash-back"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="splash-face splash-right"><i></i><i></i><i></i></div>
+          <div class="splash-face splash-left"><i></i><i></i><i></i><i></i></div>
+          <div class="splash-face splash-top"><i></i><i></i></div>
+          <div class="splash-face splash-bottom"><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+      </div>
+      <strong data-loading-title>بنجهّز اللعبة…</strong>
+      <div class="loading-indicator" aria-hidden="true"><span></span><span></span><span></span></div>
+      <small data-loading-label>جاري تحميل البورد ثلاثي الأبعاد</small>
+    </div>
+
+    <dialog id="helpDialog" class="help-dialog">
+      <button class="dialog-close" id="closeHelp">×</button>
+      <h2>قواعد اللعبة</h2>
+      <ol>
+        <li>لازم 6 علشان تطلع قطعة من القاعدة، والـ6 بيديك رمية إضافية.</li>
+        <li>لو جبت 6 ثلاث مرات متتالية، الرمية الثالثة بتتلغي والدور ينتقل.</li>
+        <li>الأكل في خانة غير آمنة يرجّع الخصم للقاعدة ويديك رمية إضافية.</li>
+        <li>خانات البداية والنجوم آمنة وممنوع الأكل عليها.</li>
+        <li>قطعتين من نفس اللون في نفس الخانة يعملوا تحصين: الخصم ماينفعش يقف عليها، لكنه يقدر يعدّي منها.</li>
+        <li>الوصول للبيت محتاج الرقم الدقيق، ووصول قطعة للنهاية يديك رمية إضافية.</li>
+        <li>لو فيه حركة قانونية واحدة فقط، السيرفر ينفذها تلقائيًا.</li>
+        <li>أول 3 يخلصوا بياخدوا المراكز، والرابع يتحدد تلقائيًا.</li>
+      </ol>
+      <p class="note">النرد، الأدوار، الأكل، الحصون والترتيب كلها محسوبة على السيرفر.</p>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <footer class="credit">3D model: “LUDO Board Games” by prashantraj264 — Sketchfab</footer>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
