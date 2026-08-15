@@ -1,139 +1,537 @@
-# Ludo 3D Multiplayer — Backend V4
+# 🎲 Ludo 3D Multiplayer
 
-This version keeps the server-authoritative multiplayer engine and fixes the 3D dice vertical-drift bug. It also adds a generic production/deployment baseline.
+A modern, real-time **3D multiplayer Ludo game** built for the web with an interactive 3D board, multiplayer rooms, bots, reconnect support, server-authoritative game logic, sound effects, and responsive mobile/desktop gameplay.
 
+<p align="center">
+  <strong>Developed by Eng. Abuzaid Saad</strong>
+</p>
 
+---
 
-## V4 multiplayer hardening
+## 🌐 Live Demo
 
-- Every authoritative room/game snapshot now carries a monotonic `stateVersion`.
-- Every gameplay action carries a `turnId`/action epoch so late requests from an older turn are rejected.
-- `rollDice` and `movePiece` require a unique `actionId`; duplicate requests are idempotent and execute only once.
-- Each room has a serialized action queue, so two mutations cannot resolve concurrently.
-- Stale actions return `STALE_ACTION` plus a fresh authoritative snapshot and trigger automatic client resync.
-- The client ignores older snapshots and duplicated semantic events.
-- Reconnect always receives a complete snapshot before normal interaction resumes.
-- Bots and automatic single-move actions use the same queued authoritative action pipeline as human actions.
-- Added `requestStateSync` for explicit full-state recovery.
-- Test suite expanded with sync/version/idempotency/socket simulations.
+### 👉 [Play Ludo 3D Online](https://gp-9vrs.onrender.com)
 
-## V2 changes
+> The project is currently hosted on a free Render instance, so the first load may take a few seconds if the server has been inactive.
 
-- Fixed cumulative 3D dice Y-position drift: every roll now animates from and settles back to one immutable rest height.
-- The dice is also re-centered over the board before each roll.
-- Added richer `/health` runtime stats.
-- Added graceful `SIGTERM` / `SIGINT` shutdown for hosting platforms.
-- Added `Dockerfile` and `.dockerignore` for generic WebSocket-capable deployment.
-- Added `npm run check` syntax validation.
+---
 
-## Included
+## ✨ Features
 
-- 4-player realtime rooms.
-- 60-second waiting lobby.
-- Owner-only **Fill With Bots** after the waiting time ends.
-- Immediate start when 4 humans join.
-- Server-authoritative dice, turns, legal moves, captures, safe cells, blockades, exact finish, triple-six penalty, extra-roll rewards and ranking.
-- Revised blockade rule: opponents may pass through a blockade but cannot land on it.
-- Home reward: finishing one piece grants one extra roll unless the player has just completed all four pieces.
-- First three finishers are ranked; the remaining player becomes fourth automatically.
-- Server-side bots.
-- If a human disconnects during a game, a bot continues their color; reconnecting with the saved session token restores the human player.
-- Client-side 3D animations and procedural sound effects driven by semantic server events.
-- Individual player camera perspective.
-- Mobile play directly through the 3D dice and pieces.
-- No database yet; rooms live in server memory.
+### 🎮 Multiplayer Gameplay
 
-## Run on Windows
+* Real-time multiplayer using **Socket.IO**
+* Up to **4 players per room**
+* Create private game rooms
+* Join using a Room Code
+* Copy Room Code
+* Copy Room Link
+* Mobile Share button
+* Real-time player synchronization
+* Automatic game start when 4 players join
 
-Double-click `START_SERVER.bat`.
+### 🤖 Bots
 
-The first run installs npm dependencies, starts the server, and opens:
+If a room does not fill with four human players, the room owner can complete the remaining slots with bots.
 
-`http://localhost:3000`
+Supported combinations include:
 
-To test multiplayer locally, open the URL in multiple browsers/devices on the same network. For another device, use your computer's LAN IP instead of `localhost`.
+* 1 Human + 3 Bots
+* 2 Humans + 2 Bots
+* 3 Humans + 1 Bot
+* 4 Humans
 
-## Run manually
+Bots use the same server-side game rules as human players.
+
+---
+
+## 🎲 3D Gameplay
+
+The game uses a fully interactive **3D Ludo board** powered by Three.js.
+
+Features include:
+
+* Interactive 3D dice
+* Animated dice rolling
+* Animated piece movement
+* Different camera perspective for each player
+* Automatic camera rotation based on player color
+* Manual camera control
+* Mobile-friendly 3D interaction
+* Click/tap the 3D dice to roll on mobile
+* Active player piece outlines
+* Multiple pieces displayed clearly when occupying the same cell
+
+---
+
+## 📱 Responsive Design
+
+Ludo 3D is designed to work across:
+
+* Desktop
+* Laptop
+* Tablet
+* Mobile
+
+The UI automatically changes depending on the screen size.
+
+On mobile, unnecessary control panels are removed to provide more room for the 3D board.
+
+---
+
+## 🏠 Lobby System
+
+Each multiplayer room includes a modern lobby with:
+
+* Room Code
+* Copy Code button
+* Copy Room Link button
+* Native Share button on supported devices
+* Player slots
+* Player count
+* Room owner indicator
+* Bot indicators
+* Waiting timer
+* Fill With Bots option
+
+Rooms support a maximum of:
+
+```text
+4 Players
+```
+
+---
+
+## ⏳ Waiting System
+
+When a room is created, a waiting timer starts.
+
+If four human players join, the game begins automatically.
+
+If the timer finishes before the room is full, the room owner can fill the remaining positions with bots.
+
+---
+
+# 🎯 Game Rules
+
+## Leaving the Base
+
+A piece can only leave its base when the player rolls:
+
+```text
+6
+```
+
+Rolling a 6 also grants an additional roll.
+
+---
+
+## Triple Six Rule
+
+If a player rolls three consecutive sixes:
+
+```text
+6 → 6 → 6
+```
+
+The third roll is cancelled and the player's turn ends.
+
+---
+
+## Piece Movement
+
+After leaving the base, pieces move forward according to the dice result.
+
+All movement is calculated by the server.
+
+The client cannot manually determine a piece's final position.
+
+---
+
+## ⚔️ Capturing
+
+If a piece lands on an opponent's piece on a normal square:
+
+* The opponent's piece returns to its base.
+* The player receives an additional roll.
+
+---
+
+## ⭐ Safe Cells
+
+Certain cells are protected.
+
+Pieces standing on Safe Cells cannot be captured.
+
+Safe cells are displayed using golden stars where appropriate.
+
+Starting cells are also protected but do not display unnecessary visual stars.
+
+---
+
+## 🛡️ Double Piece Protection
+
+If two pieces belonging to the same player occupy the same cell:
+
+```text
+Double Block
+```
+
+An opponent cannot finish their movement on that cell.
+
+---
+
+## 🏁 Home Lane
+
+After completing a full lap around the board, a piece enters the Home Lane belonging to its color.
+
+A piece must receive the **exact dice value** required to reach the final Home position.
+
+For example:
+
+```text
+1 step remaining + Dice = 1 ✅
+
+1 step remaining + Dice = 3 ❌
+```
+
+---
+
+## 🎁 Home Reward
+
+When a piece successfully reaches Home:
+
+```text
+Player receives an additional roll
+```
+
+---
+
+## 🏆 Winning System
+
+Each player has four pieces.
+
+A player receives their final ranking once all four pieces reach Home.
+
+The ranking system is:
+
+```text
+🥇 1st Place
+🥈 2nd Place
+🥉 3rd Place
+4th Place
+```
+
+The game does **not** wait for the final player to finish.
+
+Once three players have completed all their pieces, the remaining player automatically receives 4th place.
+
+---
+
+# 🔊 Sound System
+
+The game contains contextual audio effects triggered by gameplay events.
+
+Current custom sounds include:
+
+* Rolling a 6
+* Piece leaving the base
+* Capturing another player
+* Piece reaching Home
+* Player disconnecting
+
+Additional game sounds are generated or handled by the client audio system.
+
+---
+
+# 🔌 Reconnect System
+
+Players receive a persistent player token stored locally.
+
+If a player disconnects during a game:
+
+```text
+Human Player → Temporary Bot
+```
+
+The bot continues playing so the game does not stop.
+
+If the original player reconnects using the same session:
+
+```text
+Bot → Human Player
+```
+
+The player automatically restores:
+
+* Their color
+* Their pieces
+* Their current progress
+* Their position in the game
+
+---
+
+# 🔄 State Synchronization
+
+The server is the authoritative source of truth.
+
+The multiplayer architecture includes:
+
+* `stateVersion`
+* `turnId`
+* Unique `actionId`
+* Duplicate-action protection
+* Stale-action protection
+* Room action queues
+* Full-state snapshots
+* Automatic client resynchronization
+
+This prevents issues such as:
+
+* Double dice rolls
+* Duplicate piece movement
+* Old moves executing after a turn changes
+* Different game states between players
+
+---
+
+# 🛡️ Server-Authoritative Architecture
+
+Important game decisions are never trusted to the browser.
+
+The server controls:
+
+* Dice results
+* Player turns
+* Legal moves
+* Piece positions
+* Captures
+* Safe cells
+* Home movement
+* Triple six detection
+* Extra rolls
+* Rankings
+* Bot decisions
+
+The browser is mainly responsible for:
+
+```text
+Input + 3D Rendering + Animation + Audio
+```
+
+---
+
+# 🛠️ Technology Stack
+
+## Frontend
+
+* HTML5
+* CSS3
+* JavaScript
+* Three.js
+* Web Audio API
+
+## Backend
+
+* Node.js
+* Express.js
+* Socket.IO
+
+## Multiplayer
+
+* WebSockets
+* Socket.IO Rooms
+
+## Deployment
+
+* Render
+
+---
+
+# 📂 Project Structure
+
+```text
+/
+├── client/
+│   ├── assets/
+│   │   ├── audio/
+│   │   └── ludo_board_games.glb
+│   │
+│   ├── index.html
+│   ├── app.js
+│   └── styles.css
+│
+├── server/
+│   ├── game/
+│   │   └── GameEngine.js
+│   │
+│   ├── rooms/
+│   │   └── RoomManager.js
+│   │
+│   ├── bots/
+│   │   └── BotPlayer.js
+│   │
+│   └── socket/
+│       └── socketHandlers.js
+│
+├── server.js
+├── package.json
+├── Dockerfile
+└── README.md
+```
+
+---
+
+# 🚀 Running Locally
+
+## 1. Clone the repository
+
+```bash
+git clone <YOUR_REPOSITORY_URL>
+```
+
+## 2. Open the project
+
+```bash
+cd ludo-3d-multiplayer
+```
+
+## 3. Install dependencies
 
 ```bash
 npm install
+```
+
+## 4. Start the server
+
+```bash
 npm start
 ```
 
-Then open `http://localhost:3000`.
-
-## Tests
-
-```bash
-npm test
-```
-
-The test suite covers the locked game-engine rules, room/bot/reconnect behavior, state versions, action queues, duplicate action IDs, stale-action recovery, and socket-level sync simulations.
-
-## Project structure
+## 5. Open the game
 
 ```text
-client/
-  index.html
-  styles.css
-  app.js
-  assets/ludo_board_games.glb
-server/
-  server.js
-  game/
-    constants.js
-    GameEngine.js
-    BotPlayer.js
-  rooms/
-    RoomManager.js
-  socket/
-    socketHandlers.js
-  utils/
-    id.js
-tests/
-GAME_RULES_BACKEND.md
-AUDIO_EVENTS_BACKEND.md
+http://localhost:3000
 ```
 
-## Realtime events
+---
 
-Client → server:
+# ❤️ Health Check
 
-- `createRoom`
-- `joinRoom`
-- `resumeSession`
-- `fillWithBots`
-- `rollDice`
-- `movePiece`
-- `playAgain`
-- `requestStateSync`
+The backend exposes a health endpoint:
 
-Server → client:
+```text
+/health
+```
 
-- `roomState` — authoritative room/game snapshot.
-- `gameEvent` — semantic gameplay/audio/animation event.
-- `gameError` — rejected action with an error code.
-- `resyncRequired` — asks the client to fetch a fresh authoritative snapshot.
+Example:
 
-## Current architecture boundary
+```text
+https://gp-9vrs.onrender.com/health
+```
 
-The server owns all gameplay decisions. The browser is allowed to request `rollDice` and `movePiece(pieceId)`, but it never supplies the dice value, destination position, winner, capture result, or ranking.
+The endpoint reports whether the server is online and provides basic room/player statistics.
 
-The current single-process in-memory room store is intentional for this small MVP. A later version can replace room persistence/pub-sub with Redis if multiple server instances are ever needed.
+---
 
+# 🧪 Testing
 
-## V3 desktop/tablet HUD layout
+The project includes automated tests for important game and multiplayer behavior, including:
 
-- Player panel is stacked above the game controls on the right.
-- Camera controls sit directly below the game controls.
-- Player cards use a compact 2x2 grid on desktop/tablet.
-- Turn, dice status, roll button, and piece choices are consolidated inside one compact dice zone.
-- Desktop/tablet camera framing is slightly closer and shifted away from the HUD so the 3D board uses more of the available screen.
-- Mobile keeps the direct-on-board gameplay layout and compact auto-camera control.
+* Room creation
+* Room joining
+* Maximum player limit
+* Dice rules
+* Triple six
+* Safe cells
+* Capturing
+* Double-piece protection
+* Exact Home entry
+* Home reward
+* Rankings
+* Bots
+* Duplicate actions
+* Stale actions
+* State synchronization
+* Disconnect/reconnect behavior
 
-## V6 lobby + recorded audio update
+---
 
-- Added the five supplied recorded audio clips for: rolling a 6, capture, player disconnect, piece leaving base, and piece reaching home.
-- Existing synthesized effects for all other game events remain unchanged.
-- Redesigned lobby with dedicated Copy Code, Copy Link, and Share actions.
-- Splash screen now shows a real GLB loading progress bar and percentage.
+# 🧠 Current Architecture
+
+The current version intentionally uses a lightweight architecture suitable for small multiplayer matches.
+
+Room and game state are currently stored in server memory.
+
+This keeps the project:
+
+* Fast
+* Simple
+* Easy to deploy
+* Suitable for small groups of players
+
+Future versions can introduce Redis or another persistent storage system if horizontal scaling or persistent games are required.
+
+---
+
+# 🗺️ Future Improvements
+
+Potential future additions include:
+
+* Player accounts
+* Friends system
+* Public matchmaking
+* Private invitations
+* Game history
+* Statistics
+* Leaderboards
+* Custom player avatars
+* More sound effects
+* Additional bot difficulty levels
+* Redis-backed room persistence
+* Multiple server instances
+* Spectator mode
+* In-game reactions
+* Custom themes and boards
+
+---
+
+# 🎨 3D Asset Credits
+
+The Ludo board is based on the **“LUDO Board Games”** 3D model by **prashantraj264 / Prashant Kumar Raj** from Sketchfab.
+
+The model has been integrated and adapted for interactive real-time gameplay.
+
+Original model:
+
+https://sketchfab.com/3d-models/ludo-board-games-7da189e14bef49adbe0bf6020a64b5e8
+
+Please refer to the original asset page for its licensing and attribution requirements.
+
+---
+
+# 👨‍💻 Developer
+
+## Eng. Abuzaid Saad
+
+Designed and developed with a focus on:
+
+* Multiplayer architecture
+* Real-time synchronization
+* 3D web development
+* Responsive gameplay
+* Server-authoritative game logic
+
+---
+
+<p align="center">
+  <strong>🎲 Ludo 3D Multiplayer</strong>
+</p>
+
+<p align="center">
+  Developed with ❤️ by <strong>Eng. Abuzaid Saad</strong>
+</p>
+
+<p align="center">
+  <a href="https://gp-9vrs.onrender.com">Play Now</a>
+</p>
