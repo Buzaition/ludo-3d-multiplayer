@@ -97,22 +97,44 @@
         <small class="network-hint">كل روم = 4 لاعبين. لو العدد ناقص بعد دقيقة، صاحب الروم يقدر يكمل ببوتات.</small>
       </section>
 
-      <section id="lobbyScreen" class="network-card glass" hidden>
-        <div class="lobby-head">
-          <div>
-            <small>ROOM CODE</small>
-            <button id="copyRoomBtn" class="room-code-display" title="نسخ الكود">------</button>
+      <section id="lobbyScreen" class="network-card lobby-card glass" hidden>
+        <div class="lobby-head lobby-head-modern">
+          <div class="lobby-heading">
+            <span class="lobby-live-dot" aria-hidden="true"></span>
+            <div>
+              <small>غرفة اللعب</small>
+              <h2>مستنيين أصحابك</h2>
+            </div>
           </div>
-          <button id="leaveRoomBtn" class="ghost-btn compact">خروج</button>
+          <button id="leaveRoomBtn" class="ghost-btn compact danger-soft">خروج</button>
         </div>
-        <h2>مستنيين اللاعبين</h2>
+
+        <div class="room-share-card">
+          <div class="room-code-block">
+            <span>كود الروم</span>
+            <strong id="roomCodeDisplay" class="room-code-display">------</strong>
+          </div>
+          <div class="room-share-actions">
+            <button id="copyCodeBtn" class="share-action-btn" type="button"><span>⧉</span> نسخ الكود</button>
+            <button id="copyLinkBtn" class="share-action-btn" type="button"><span>🔗</span> نسخ الرابط</button>
+            <button id="shareRoomBtn" class="share-action-btn accent" type="button"><span>↗</span> مشاركة</button>
+          </div>
+        </div>
+
+        <div class="lobby-summary">
+          <div class="summary-pill">
+            <small>اللاعبين</small>
+            <strong id="lobbyCount">1 / 4</strong>
+          </div>
+          <div class="summary-pill timer-pill">
+            <small>وقت الانتظار</small>
+            <strong id="waitingTimer">01:00</strong>
+          </div>
+        </div>
+
         <div id="lobbyPlayers" class="lobby-players"></div>
-        <div class="lobby-timer">
-          <span>وقت الانتظار</span>
-          <strong id="waitingTimer">01:00</strong>
-        </div>
-        <button id="fillBotsBtn" class="primary-btn" disabled>كمّل ببوتات 🤖</button>
-        <small id="lobbyHint" class="network-hint">لما الأربع أماكن تكتمل، اللعبة هتبدأ تلقائيًا.</small>
+        <button id="fillBotsBtn" class="primary-btn lobby-bots-btn" disabled>كمّل ببوتات 🤖</button>
+        <small id="lobbyHint" class="network-hint lobby-hint">لما الأربع أماكن تكتمل، اللعبة هتبدأ تلقائيًا.</small>
       </section>
     </div>
 
@@ -128,8 +150,10 @@
         </div>
       </div>
       <strong data-loading-title>بنجهّز اللعبة…</strong>
-      <div class="loading-indicator" aria-hidden="true"><span></span><span></span><span></span></div>
-      <small data-loading-label>جاري تحميل البورد ثلاثي الأبعاد</small>
+      <div class="loading-progress-wrap" aria-label="تحميل اللعبة">
+        <div class="loading-progress-track"><span id="loadingProgressBar"></span></div>
+        <div class="loading-progress-meta"><small data-loading-label>جاري تحميل البورد ثلاثي الأبعاد</small><strong id="loadingProgressText">0%</strong></div>
+      </div>
     </div>
 
     <dialog id="helpDialog" class="help-dialog">

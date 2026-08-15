@@ -69,12 +69,19 @@ const nameInput = document.querySelector('#nameInput');
 const roomCodeInput = document.querySelector('#roomCodeInput');
 const createRoomBtn = document.querySelector('#createRoomBtn');
 const joinRoomBtn = document.querySelector('#joinRoomBtn');
-const copyRoomBtn = document.querySelector('#copyRoomBtn');
+const roomCodeDisplay = document.querySelector('#roomCodeDisplay');
+const copyCodeBtn = document.querySelector('#copyCodeBtn');
+const copyLinkBtn = document.querySelector('#copyLinkBtn');
+const shareRoomBtn = document.querySelector('#shareRoomBtn');
+const lobbyCount = document.querySelector('#lobbyCount');
 const leaveRoomBtn = document.querySelector('#leaveRoomBtn');
 const lobbyPlayers = document.querySelector('#lobbyPlayers');
 const waitingTimer = document.querySelector('#waitingTimer');
 const fillBotsBtn = document.querySelector('#fillBotsBtn');
 const lobbyHint = document.querySelector('#lobbyHint');
+const loadingProgressBar = document.querySelector('#loadingProgressBar');
+const loadingProgressText = document.querySelector('#loadingProgressText');
+const loadingLabel = loading.querySelector('[data-loading-label]');
 
 // Scene
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false, powerPreference:'high-performance' });
@@ -291,16 +298,53 @@ roomCodeInput.addEventListener('input', () => {
 nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') createRoomBtn.click(); });
 roomCodeInput.addEventListener('keydown', e => { if (e.key === 'Enter') joinRoomBtn.click(); });
 
-copyRoomBtn.addEventListener('click', async () => {
-  if (!roomState) return;
-  const shareUrl = `${location.origin}${location.pathname}?room=${roomState.id}`;
+function roomShareUrl() {
+  return roomState ? `${location.origin}${location.pathname}?room=${roomState.id}` : location.href;
+}
+
+async function copyText(text) {
   try {
-    await navigator.clipboard.writeText(shareUrl);
-    toast('لينك الروم اتنسخ ✅');
+    await navigator.clipboard.writeText(text);
+    return true;
   } catch {
-    await navigator.clipboard.writeText(roomState.id).catch(() => {});
-    toast(`كود الروم: ${roomState.id}`);
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
   }
+}
+
+copyCodeBtn.addEventListener('click', async () => {
+  if (!roomState) return;
+  const ok = await copyText(roomState.id);
+  toast(ok ? 'كود الروم اتنسخ ✅' : `كود الروم: ${roomState.id}`);
+});
+
+copyLinkBtn.addEventListener('click', async () => {
+  if (!roomState) return;
+  const ok = await copyText(roomShareUrl());
+  toast(ok ? 'لينك الروم اتنسخ ✅' : 'مقدرتش أنسخ اللينك.');
+});
+
+shareRoomBtn.addEventListener('click', async () => {
+  if (!roomState) return;
+  const url = roomShareUrl();
+  if (navigator.share) {
+    try {
+      await navigator.share({ title:'LUDO 3D', text:`ادخل روم ${roomState.id} ونلعب لودو`, url });
+      return;
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+    }
+  }
+  const ok = await copyText(url);
+  toast(ok ? 'المشاركة مش متاحة هنا، فنسختلك اللينك ✅' : 'مقدرتش أفتح المشاركة.');
 });
 
 fillBotsBtn.addEventListener('click', () => {
@@ -340,7 +384,8 @@ function updateNetworkUI() {
   }
 
   if (waiting) {
-    copyRoomBtn.textContent = roomState.id;
+    roomCodeDisplay.textContent = roomState.id;
+    if (lobbyCount) lobbyCount.textContent = `${roomState.players.length} / 4`;
     renderLobbyPlayers();
     startLobbyTimer();
   } else stopLobbyTimer();
@@ -350,6 +395,7 @@ function updateNetworkUI() {
 
 function renderLobbyPlayers() {
   if (!roomState) return;
+  if (lobbyCount) lobbyCount.textContent = `${roomState.players.length} / 4`;
   const slots = COLORS.map(color => roomState.players.find(player => player.color === color));
   lobbyPlayers.innerHTML = slots.map((player, index) => {
     if (!player) return `<div class="lobby-slot empty">مكان فاضي</div>`;
@@ -381,6 +427,29 @@ function updateLobbyTimer() {
       : roomState.you?.isOwner
         ? 'بعد انتهاء الدقيقة تقدر تكمل الأماكن الفاضية ببوتات.'
         : 'صاحب الروم يقدر يكمل ببوتات بعد انتهاء وقت الانتظار.';
+}
+
+// Recorded clips supplied by the user. Other SFX stay synthesized below.
+const RECORDED_SFX_PATHS = {
+  six: './assets/audio/six.mp3',
+  capture: './assets/audio/capture.wav',
+  disconnect: './assets/audio/player-disconnected.mp3',
+  home: './assets/audio/piece-home.mp3',
+  pieceOut: './assets/audio/piece-out.mp3'
+};
+const recordedSfx = Object.fromEntries(Object.entries(RECORDED_SFX_PATHS).map(([key, src]) => {
+  const audio = new Audio(src);
+  audio.preload = 'auto';
+  audio.load();
+  return [key, audio];
+}));
+function playRecordedSfx(key, volume = 1) {
+  const original = recordedSfx[key];
+  if (!original) return false;
+  const audio = original.cloneNode(true);
+  audio.volume = Math.max(0, Math.min(1, volume));
+  audio.play().catch(() => {});
+  return true;
 }
 
 // Audio
@@ -431,21 +500,21 @@ function handleGameEvent(event) {
     case 'DICE_ROLL_STARTED':
       SFX.diceRoll(); startDiceRolling(); if(event.playerId===roomState?.you?.playerId) rollPending=true; break;
     case 'DICE_ROLLED':
-      setDiceValue(event.value); orientDiceToValue(event.value); rollPending=false; if(event.value===6&&!event.penalized)SFX.six(); break;
+      setDiceValue(event.value); orientDiceToValue(event.value); rollPending=false; if(event.value===6&&!event.penalized)playRecordedSfx('six',.95); break;
     case 'TRIPLE_SIX_PENALTY': SFX.tripleSix(); toast('3 ستات متتالية — الرمية الثالثة اتلغت'); break;
-    case 'PIECE_LEFT_BASE': SFX.pieceOut(); break;
+    case 'PIECE_LEFT_BASE': playRecordedSfx('pieceOut',.95); break;
     case 'PIECE_ENTERED_SAFE_CELL': SFX.safe(); break;
-    case 'PIECE_CAPTURED': SFX.capture(); toast('أكل! عندك رمية إضافية 🔥'); break;
+    case 'PIECE_CAPTURED': playRecordedSfx('capture',.95); toast('أكل! عندك رمية إضافية 🔥'); break;
     case 'BLOCKADE_FORMED': SFX.blockade(); break;
     case 'MOVE_REJECTED_BLOCKADE': SFX.blockade(); break;
     case 'CHASE_THREAT': SFX.chase(); break;
-    case 'PIECE_REACHED_HOME': SFX.home(); toast('قطعة وصلت للبيت 🎉'); break;
+    case 'PIECE_REACHED_HOME': playRecordedSfx('home',.95); toast('قطعة وصلت للبيت 🎉'); break;
     case 'EXACT_FINISH_WAIT': SFX.exactWait(); break;
     case 'PLAYER_FINISHED':
       if(event.rank===1)SFX.victory();
       if(event.rank<=3)toast(`المركز ${event.rank} اتحسم 🏆`);
       break;
-    case 'PLAYER_DISCONNECTED_TO_BOT': toast('لاعب فصل — البوت هيكمل مكانه 🤖'); break;
+    case 'PLAYER_DISCONNECTED_TO_BOT': playRecordedSfx('disconnect',.95); toast('لاعب فصل — البوت هيكمل مكانه 🤖'); break;
     case 'GAME_STARTED': toast('اللعبة بدأت! 🎲'); break;
   }
   renderHUD();
@@ -607,8 +676,16 @@ function addSafeStars(){safeStarsGroup=new THREE.Group();const outer=Math.min(ce
 function mapModelPieces(root){piecesByColor={RED:[],GREEN:[],YELLOW:[],BLUE:[]};pieceMeshes=[];const materialToColor=Object.fromEntries(COLORS.map(c=>[META[c].material,c]));root.updateMatrixWorld(true);root.traverse(obj=>{if(!obj.isMesh)return;obj.castShadow=true;obj.receiveShadow=true;const matName=obj.material?.name,color=materialToColor[matName];if(color){const movableRoot=obj.parent&&obj.parent!==root?obj.parent:obj;const homeWorld=new THREE.Vector3();movableRoot.getWorldPosition(homeWorld);const scaledHome=movableRoot.scale.clone().multiplyScalar(PIECE_BASE_SCALE);movableRoot.scale.copy(scaledHome);obj.material=obj.material.clone();obj.material.color.set(META[color].pieceTint);if('roughness'in obj.material)obj.material.roughness=.38;if('metalness'in obj.material)obj.material.metalness=.08;const outline=new THREE.Mesh(obj.geometry,new THREE.MeshBasicMaterial({color:META[color].outline,side:THREE.BackSide,transparent:true,opacity:.95,depthWrite:false,toneMapped:false}));outline.scale.setScalar(1.085);outline.visible=false;outline.renderOrder=4;outline.raycast=()=>{};obj.add(outline);const ref={mesh:obj,root:movableRoot,outline,color,homeWorld,homeScale:scaledHome.clone(),homeQuaternion:movableRoot.quaternion.clone()};piecesByColor[color].push(ref);pieceMeshes.push(obj);obj.userData.pieceVisual=ref;}if(matName==='DICE_M'&&obj.parent)originalDiceRoot=obj.parent;});if(originalDiceRoot)originalDiceRoot.visible=false;for(const color of COLORS)piecesByColor[color].sort((a,b)=>(b.homeWorld.z-a.homeWorld.z)||(a.homeWorld.x-b.homeWorld.x));const ys=COLORS.flatMap(c=>piecesByColor[c].map(p=>p.homeWorld.y));if(ys.length)pieceGroundY=ys.reduce((a,b)=>a+b,0)/ys.length;}
 function calculateBoard(root){const candidates=[];root.traverse(obj=>{if(!obj.isMesh)return;const name=obj.material?.name||'';if(!name.startsWith('LUDO_BOARD_UPPER'))return;const box=new THREE.Box3().setFromObject(obj),size=box.getSize(new THREE.Vector3());candidates.push({box,area:size.x*size.z,yThickness:size.y});});if(candidates.length){candidates.sort((a,b)=>Math.abs(a.yThickness-b.yThickness)>1e-5?a.yThickness-b.yThickness:a.area-b.area);boardBounds=candidates[0].box.clone();}else boardBounds=new THREE.Box3().setFromObject(root);const size=boardBounds.getSize(new THREE.Vector3());boardCenter=boardBounds.getCenter(new THREE.Vector3());cellW=size.x/15;cellD=size.z/15;controls.target.set(boardCenter.x,pieceGroundY,boardCenter.z);}
 
+function setLoadingProgress(percent, label) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)));
+  if (loadingProgressBar) loadingProgressBar.style.width = `${value}%`;
+  if (loadingProgressText) loadingProgressText.textContent = `${value}%`;
+  if (label && loadingLabel) loadingLabel.textContent = label;
+}
+setLoadingProgress(2, 'جاري تحميل البورد ثلاثي الأبعاد');
+
 const loader=new GLTFLoader();
-loader.load('./assets/ludo_board_games.glb',gltf=>{modelRoot=gltf.scene;scene.add(modelRoot);modelRoot.updateMatrixWorld(true);mapModelPieces(modelRoot);calculateBoard(modelRoot);addSafeStars();buildCustomDice();modelReady=true;loading.classList.add('hidden');updateNetworkUI();if(roomState)snapshotQueue=snapshotQueue.then(()=>applySnapshot(roomState));},xhr=>{const label=loading.querySelector('[data-loading-label]');if(label&&xhr.loaded>0)label.textContent='جاري تجهيز المجسم والخامات…';},error=>{console.error(error);loading.querySelector('[data-loading-title]').textContent='مقدرناش نحمّل ملف الـ3D';loading.querySelector('[data-loading-label]').textContent='تأكد إن السيرفر شغال عن طريق npm start.';});
+loader.load('./assets/ludo_board_games.glb',gltf=>{setLoadingProgress(92,'جاري تجهيز المجسم والخامات…');modelRoot=gltf.scene;scene.add(modelRoot);modelRoot.updateMatrixWorld(true);mapModelPieces(modelRoot);calculateBoard(modelRoot);addSafeStars();buildCustomDice();modelReady=true;setLoadingProgress(100,'جاهزين!');setTimeout(()=>loading.classList.add('hidden'),220);updateNetworkUI();if(roomState)snapshotQueue=snapshotQueue.then(()=>applySnapshot(roomState));},xhr=>{if(xhr.loaded>0){const ratio=xhr.total>0?xhr.loaded/xhr.total:Math.min(.9,xhr.loaded/(12*1024*1024));setLoadingProgress(4+ratio*84,ratio>.65?'قربنا نخلص تحميل البورد…':'جاري تحميل البورد ثلاثي الأبعاد');}},error=>{console.error(error);loading.querySelector('[data-loading-title]').textContent='مقدرناش نحمّل ملف الـ3D';setLoadingProgress(0,'تأكد إن السيرفر شغال عن طريق npm start.');});
 
 // Picking / camera
 const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();

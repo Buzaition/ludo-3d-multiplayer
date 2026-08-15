@@ -130,3 +130,10 @@ The current single-process in-memory room store is intentional for this small MV
 - Turn, dice status, roll button, and piece choices are consolidated inside one compact dice zone.
 - Desktop/tablet camera framing is slightly closer and shifted away from the HUD so the 3D board uses more of the available screen.
 - Mobile keeps the direct-on-board gameplay layout and compact auto-camera control.
+
+## V6 lobby + recorded audio update
+
+- Added the five supplied recorded audio clips for: rolling a 6, capture, player disconnect, piece leaving base, and piece reaching home.
+- Existing synthesized effects for all other game events remain unchanged.
+- Redesigned lobby with dedicated Copy Code, Copy Link, and Share actions.
+- Splash screen now shows a real GLB loading progress bar and percentage.

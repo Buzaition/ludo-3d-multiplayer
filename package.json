@@ -1,6 +1,6 @@
 {
   "name": "ludo-3d-multiplayer",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "Deploy-ready server-authoritative realtime 3D Ludo MVP with Socket.IO rooms, bots, reconnect and sync protection",
