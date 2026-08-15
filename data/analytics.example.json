@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "updatedAt": null,
+  "totals": {
+    "STORE_VIEW": 0,
+    "PACKAGE_CLICK": 0,
+    "PAYMENT_METHOD_SELECTED": 0,
+    "PURCHASE_INTENT": 0,
+    "PURCHASE_CANCELLED": 0
+  },
+  "packages": {
+    "starter": 0,
+    "popular": 0,
+    "pro": 0,
+    "king": 0
+  },
+  "payments": {
+    "vodafone_cash": 0,
+    "instapay": 0
+  },
+  "uniqueVisitorIds": [],
+  "lastEvents": []
+}

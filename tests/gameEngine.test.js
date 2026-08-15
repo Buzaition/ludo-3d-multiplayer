@@ -162,3 +162,37 @@ test('third finisher ends game and remaining player becomes fourth', () => {
   assert.equal(game.getPlayer('p4').finishedRank, 4);
   assert.ok(result.events.some(event => event.type === 'GAME_FINISHED'));
 });
+
+test('2v2 teammates do not capture each other and game ends when both teammates finish', () => {
+  const players = makePlayers().map(player => ({
+    ...player,
+    teamId: player.color === 'RED' || player.color === 'YELLOW' ? 'A' : 'B'
+  }));
+  const game = new GameEngine(players, { mode:'TEAM_2V2', rng:() => 0 });
+  const red = game.getPlayer('p1');
+  const yellow = game.getPlayer('p3');
+  const redPiece = red.pieces[0];
+  const yellowPiece = yellow.pieces[0];
+  redPiece.progress = 0;
+  yellowPiece.progress = progressAtCell('YELLOW', cellForProgress('RED', 1));
+  game.rollDice('p1', { forcedValue:1 });
+  const move = game.movePiece('p1', redPiece.id);
+  assert.notEqual(yellowPiece.progress, -1, 'teammate must not be captured');
+  assert.ok(!move.events.some(event => event.type === 'PIECE_CAPTURED'));
+
+  // Finish red completely and make yellow one exact step from completing the team.
+  red.pieces.forEach(piece => { piece.progress = FINAL_PROGRESS; piece.finished = true; });
+  if (!game.state.rankings.includes(red.id)) game.state.rankings.push(red.id);
+  yellow.pieces.forEach((piece, index) => {
+    piece.progress = index === 0 ? FINAL_PROGRESS - 1 : FINAL_PROGRESS;
+    piece.finished = index !== 0;
+  });
+  game.state.currentPlayerId = yellow.id;
+  game.state.phase = 'ROLL';
+  game.state.rolled = null;
+  game.rollDice(yellow.id, { forcedValue:1 });
+  const result = game.movePiece(yellow.id, yellow.pieces[0].id);
+  assert.equal(game.state.gameOver, true);
+  assert.equal(game.state.winningTeam, 'A');
+  assert.ok(result.events.some(event => event.type === 'GAME_FINISHED' && event.winningTeam === 'A'));
+});

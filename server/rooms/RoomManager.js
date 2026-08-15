@@ -5,39 +5,70 @@ import { randomId, randomToken, roomCode } from '../utils/id.js';
 const WAIT_MS = 60_000;
 const FINISHED_TTL_MS = 30 * 60_000;
 const WAITING_TTL_MS = 30 * 60_000;
+export const GAME_MODES = Object.freeze({ CLASSIC: 'CLASSIC', TEAM_2V2: 'TEAM_2V2' });
+export const ROOM_VISIBILITY = Object.freeze({ PRIVATE: 'PRIVATE', PUBLIC: 'PUBLIC' });
 
 function cleanName(name, fallback = 'Player') {
   const value = String(name ?? '').trim().replace(/\s+/g, ' ');
   return (value || fallback).slice(0, 24);
 }
 
+function normalizeMode(mode) {
+  return mode === GAME_MODES.TEAM_2V2 ? GAME_MODES.TEAM_2V2 : GAME_MODES.CLASSIC;
+}
+
+function normalizeVisibility(value) {
+  return value === ROOM_VISIBILITY.PUBLIC ? ROOM_VISIBILITY.PUBLIC : ROOM_VISIBILITY.PRIVATE;
+}
+
+function teamForColor(mode, color) {
+  if (mode !== GAME_MODES.TEAM_2V2) return null;
+  return color === 'RED' || color === 'YELLOW' ? 'A' : 'B';
+}
+
 export class RoomManager {
   constructor() {
     this.rooms = new Map();
     this.socketIndex = new Map();
+    this.matchQueues = new Map([
+      [GAME_MODES.CLASSIC, []],
+      [GAME_MODES.TEAM_2V2, []]
+    ]);
   }
 
-  createRoom({ socketId, name }) {
-    let code;
-    do code = roomCode(); while (this.rooms.has(code));
-
-    const player = this.#makeHumanPlayer({ socketId, name, color: COLORS[0] });
-    const now = Date.now();
-    const room = {
-      id: code,
-      ownerPlayerId: player.id,
-      status: 'WAITING',
-      stateVersion: 1,
-      createdAt: now,
-      updatedAt: now,
-      waitingEndsAt: now + WAIT_MS,
-      players: [player],
-      engine: null,
-      runtime: this.#freshRuntime()
-    };
-    this.rooms.set(code, room);
-    this.socketIndex.set(socketId, { roomId: code, playerId: player.id });
+  createRoom({ socketId, name, mode = GAME_MODES.CLASSIC, visibility = ROOM_VISIBILITY.PRIVATE }) {
+    mode = normalizeMode(mode);
+    visibility = normalizeVisibility(visibility);
+    const room = this.#newRoom({ mode, visibility, matchmaking: false });
+    const player = this.#makeHumanPlayer({
+      socketId,
+      name,
+      color: COLORS[0],
+      teamId: teamForColor(mode, COLORS[0])
+    });
+    room.ownerPlayerId = player.id;
+    room.players.push(player);
+    this.rooms.set(room.id, room);
+    this.socketIndex.set(socketId, { roomId: room.id, playerId: player.id });
     return { room, player, token: player.token };
+  }
+
+  createComputerGame({ socketId, name }) {
+    const { room, player, token } = this.createRoom({
+      socketId,
+      name,
+      mode: GAME_MODES.CLASSIC,
+      visibility: ROOM_VISIBILITY.PRIVATE
+    });
+    const usedColors = new Set(room.players.map(item => item.color));
+    while (room.players.length < 4) {
+      const color = COLORS.find(item => !usedColors.has(item));
+      usedColors.add(color);
+      room.players.push(this.#makeBotPlayer(color, room.players.length + 1, null));
+    }
+    room.waitingEndsAt = Date.now();
+    this.startGame(room);
+    return { room, player, token };
   }
 
   joinRoom({ roomId, socketId, name }) {
@@ -48,7 +79,12 @@ export class RoomManager {
 
     const usedColors = new Set(room.players.map(player => player.color));
     const color = COLORS.find(item => !usedColors.has(item));
-    const player = this.#makeHumanPlayer({ socketId, name, color });
+    const player = this.#makeHumanPlayer({
+      socketId,
+      name,
+      color,
+      teamId: teamForColor(room.mode, color)
+    });
     room.players.push(player);
     this.bumpVersion(room, 'PLAYER_JOINED');
     this.socketIndex.set(socketId, { roomId: room.id, playerId: player.id });
@@ -57,15 +93,73 @@ export class RoomManager {
     return { room, player, token: player.token };
   }
 
+  enqueueMatchmaking({ socketId, name, mode = GAME_MODES.CLASSIC }) {
+    mode = normalizeMode(mode);
+    if (this.bySocket(socketId)) throw this.error('ALREADY_IN_ROOM');
+    this.removeFromMatchmaking(socketId);
+    const queue = this.matchQueues.get(mode);
+    const entry = {
+      socketId,
+      name: cleanName(name),
+      mode,
+      enqueuedAt: Date.now()
+    };
+    queue.push(entry);
+
+    let match = null;
+    if (queue.length >= 4) {
+      const entries = queue.splice(0, 4);
+      match = this.#createMatchedRoom(entries, mode);
+    }
+    return {
+      queued: !match,
+      mode,
+      position: match ? 0 : queue.findIndex(item => item.socketId === socketId) + 1,
+      waiting: match ? 0 : queue.length,
+      match
+    };
+  }
+
+  removeFromMatchmaking(socketId) {
+    let removed = false;
+    for (const queue of this.matchQueues.values()) {
+      const index = queue.findIndex(item => item.socketId === socketId);
+      if (index >= 0) {
+        queue.splice(index, 1);
+        removed = true;
+      }
+    }
+    return removed;
+  }
+
+  queueStatus(mode = GAME_MODES.CLASSIC) {
+    const normalized = normalizeMode(mode);
+    return { mode: normalized, waiting: this.matchQueues.get(normalized).length };
+  }
+
+  listPublicRooms() {
+    return [...this.rooms.values()]
+      .filter(room => room.visibility === ROOM_VISIBILITY.PUBLIC && room.status === 'WAITING' && room.players.length < 4)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 30)
+      .map(room => ({
+        id: room.id,
+        mode: room.mode,
+        players: room.players.length,
+        capacity: 4,
+        ownerName: room.players.find(player => player.id === room.ownerPlayerId)?.name ?? 'Player',
+        waitingEndsAt: room.waitingEndsAt,
+        createdAt: room.createdAt
+      }));
+  }
+
   resume({ roomId, token, socketId }) {
     const room = this.get(roomId);
     if (!room) throw this.error('ROOM_NOT_FOUND');
     const player = room.players.find(item => item.token && item.token === token);
     if (!player) throw this.error('SESSION_NOT_FOUND');
 
-    if (player.socketId && player.socketId !== socketId) {
-      this.socketIndex.delete(player.socketId);
-    }
+    if (player.socketId && player.socketId !== socketId) this.socketIndex.delete(player.socketId);
     player.socketId = socketId;
     player.connected = true;
     if (player.originalType === 'HUMAN') player.type = 'HUMAN';
@@ -86,7 +180,7 @@ export class RoomManager {
     while (room.players.length < 4) {
       const color = COLORS.find(item => !usedColors.has(item));
       usedColors.add(color);
-      room.players.push(this.#makeBotPlayer(color, room.players.length + 1));
+      room.players.push(this.#makeBotPlayer(color, room.players.length + 1, teamForColor(room.mode, color)));
     }
     this.startGame(room);
     return room;
@@ -97,7 +191,7 @@ export class RoomManager {
     if (room.players.length !== 4) throw this.error('ROOM_NOT_READY');
     room.status = 'PLAYING';
     room.startedAt = Date.now();
-    room.engine = new GameEngine(room.players);
+    room.engine = new GameEngine(room.players, { mode: room.mode });
     room.runtime = this.#freshRuntime();
     this.bumpVersion(room, 'GAME_STARTED');
     return room;
@@ -110,7 +204,7 @@ export class RoomManager {
     if (room.status !== 'FINISHED') throw this.error('GAME_NOT_FINISHED');
     room.status = 'PLAYING';
     room.startedAt = Date.now();
-    room.engine = new GameEngine(room.players);
+    room.engine = new GameEngine(room.players, { mode: room.mode });
     room.runtime = this.#freshRuntime();
     this.bumpVersion(room, 'GAME_RESTARTED');
     return room;
@@ -124,6 +218,7 @@ export class RoomManager {
   }
 
   disconnect(socketId) {
+    this.removeFromMatchmaking(socketId);
     const ref = this.socketIndex.get(socketId);
     if (!ref) return null;
     this.socketIndex.delete(socketId);
@@ -200,6 +295,9 @@ export class RoomManager {
       serverNow: Date.now(),
       stateVersion: room.stateVersion,
       id: room.id,
+      mode: room.mode,
+      visibility: room.visibility,
+      matchmaking: !!room.matchmaking,
       status: room.status,
       ownerPlayerId: room.ownerPlayerId,
       waitingEndsAt: room.waitingEndsAt,
@@ -212,6 +310,7 @@ export class RoomManager {
           id: player.id,
           name: player.name,
           color: player.color,
+          teamId: player.teamId ?? gamePlayer?.teamId ?? null,
           type: player.type,
           connected: player.connected,
           isOwner: room.ownerPlayerId === player.id,
@@ -231,6 +330,7 @@ export class RoomManager {
             return player ? {
               playerId: player.id,
               color: player.color,
+              teamId: player.teamId ?? null,
               isOwner: room.ownerPlayerId === player.id,
               type: player.type
             } : null;
@@ -250,7 +350,6 @@ export class RoomManager {
   enqueueAction(room, task) {
     if (!room?.runtime) return Promise.reject(this.error('ROOM_NOT_FOUND'));
     const run = room.runtime.actionQueue.then(task, task);
-    // Keep the queue alive even when one action fails.
     room.runtime.actionQueue = run.catch(() => undefined);
     return run;
   }
@@ -286,11 +385,8 @@ export class RoomManager {
     if (!room?.runtime?.processedActions || !actionId) return result;
     const key = `${playerId}:${actionId}`;
     const cached = { ...result, duplicate: false };
-    // Full snapshots are intentionally not retained in the idempotency cache.
-    // A duplicate stale action can request a fresh snapshot again.
     if ('snapshot' in cached) cached.snapshot = null;
     room.runtime.processedActions.set(key, cached);
-    // Bound memory while keeping a useful idempotency window.
     while (room.runtime.processedActions.size > 256) {
       const oldest = room.runtime.processedActions.keys().next().value;
       room.runtime.processedActions.delete(oldest);
@@ -309,33 +405,78 @@ export class RoomManager {
       SESSION_NOT_FOUND: 'Saved player session was not found.',
       GAME_NOT_FINISHED: 'The current game has not finished yet.',
       STALE_ACTION: 'This action was created from an older game state. Resync and try again.',
-      ACTION_ID_REQUIRED: 'A unique actionId is required for game actions.'
+      ACTION_ID_REQUIRED: 'A unique actionId is required for game actions.',
+      ALREADY_IN_ROOM: 'Player is already inside a room.'
     };
     const err = new Error(messages[code] ?? code);
     err.code = code;
     return err;
   }
 
-  #makeHumanPlayer({ socketId, name, color }) {
+  #newRoom({ mode, visibility, matchmaking }) {
+    let code;
+    do code = roomCode(); while (this.rooms.has(code));
+    const now = Date.now();
+    return {
+      id: code,
+      mode,
+      visibility,
+      matchmaking: !!matchmaking,
+      ownerPlayerId: null,
+      status: 'WAITING',
+      stateVersion: 1,
+      createdAt: now,
+      updatedAt: now,
+      waitingEndsAt: now + WAIT_MS,
+      players: [],
+      engine: null,
+      runtime: this.#freshRuntime()
+    };
+  }
+
+  #createMatchedRoom(entries, mode) {
+    const room = this.#newRoom({ mode, visibility: ROOM_VISIBILITY.PRIVATE, matchmaking: true });
+    const participants = entries.map((entry, index) => {
+      const color = COLORS[index];
+      const player = this.#makeHumanPlayer({
+        socketId: entry.socketId,
+        name: entry.name,
+        color,
+        teamId: teamForColor(mode, color)
+      });
+      room.players.push(player);
+      this.socketIndex.set(entry.socketId, { roomId: room.id, playerId: player.id });
+      return { socketId: entry.socketId, player, token: player.token };
+    });
+    room.ownerPlayerId = room.players[0].id;
+    room.waitingEndsAt = Date.now();
+    this.rooms.set(room.id, room);
+    this.startGame(room);
+    return { room, participants };
+  }
+
+  #makeHumanPlayer({ socketId, name, color, teamId = null }) {
     return {
       id: randomId('player_'),
       token: randomToken(),
       socketId,
       name: cleanName(name),
       color,
+      teamId,
       type: 'HUMAN',
       originalType: 'HUMAN',
       connected: true
     };
   }
 
-  #makeBotPlayer(color, number) {
+  #makeBotPlayer(color, number, teamId = null) {
     return {
       id: randomId('bot_'),
       token: null,
       socketId: null,
       name: `Bot ${number}`,
       color,
+      teamId,
       type: 'BOT',
       originalType: 'BOT',
       connected: true

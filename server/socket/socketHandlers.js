@@ -345,18 +345,72 @@ export function registerSocketHandlers(io, roomManager) {
     });
   }
 
+  function emitPublicRooms() {
+    const rooms = roomManager.listPublicRooms();
+    if (typeof io.emit === 'function') io.emit('publicRooms', rooms);
+    else for (const client of io.sockets?.sockets?.values?.() ?? []) client.emit?.('publicRooms', rooms);
+  }
+
+  function emitQueueStatuses() {
+    for (const [mode, queue] of roomManager.matchQueues.entries()) {
+      queue.forEach((entry, index) => {
+        const queuedSocket = io.sockets.sockets.get(entry.socketId);
+        queuedSocket?.emit('matchmakingStatus', {
+          mode,
+          position: index + 1,
+          waiting: queue.length,
+          needed: Math.max(0, 4 - queue.length)
+        });
+      });
+    }
+  }
+
+  function deliverMatch(match) {
+    if (!match) return;
+    const { room, participants } = match;
+    for (const participant of participants) {
+      const participantSocket = io.sockets.sockets.get(participant.socketId);
+      if (!participantSocket) continue;
+      participantSocket.join(room.id);
+      const snapshot = roomManager.publicRoom(room, participant.player.id);
+      participantSocket.emit('matchFound', {
+        roomId: room.id,
+        playerId: participant.player.id,
+        token: participant.token,
+        mode: room.mode,
+        snapshot
+      });
+    }
+    io.to(room.id).emit('gameEvent', {
+      type: 'GAME_STARTED',
+      roomId: room.id,
+      mode: room.mode,
+      stateVersion: room.stateVersion,
+      turnId: room.engine.state.turnId,
+      at: Date.now(),
+      matchmaking: true
+    });
+    emitRoomState(room);
+    scheduleNextAction(room);
+    console.log(`[MATCH FOUND] ${room.mode} -> ${room.id}`);
+  }
+
   io.on('connection', socket => {
     socket.on('createRoom', (payload = {}, ack) => {
       try {
         const existing = roomManager.bySocket(socket.id);
         if (existing) roomManager.disconnect(socket.id);
+        roomManager.removeFromMatchmaking(socket.id);
         const { room, player, token } = roomManager.createRoom({
           socketId: socket.id,
-          name: payload.name
+          name: payload.name,
+          mode: payload.mode,
+          visibility: payload.visibility
         });
         socket.join(room.id);
         console.log(`[ROOM CREATED] ${room.id} by ${player.name}`);
         emitRoomState(room);
+        emitPublicRooms();
         ackSafe(ack, {
           ok: true,
           roomId: room.id,
@@ -364,6 +418,52 @@ export function registerSocketHandlers(io, roomManager) {
           playerId: player.id,
           stateVersion: room.stateVersion
         });
+      } catch (error) {
+        fail(socket, error, ack);
+      }
+    });
+
+    socket.on('listPublicRooms', (_payload = {}, ack) => {
+      ackSafe(ack, { ok: true, rooms: roomManager.listPublicRooms() });
+    });
+
+    socket.on('quickMatch', (payload = {}, ack) => {
+      try {
+        const name = String(payload.name || '').trim();
+        if (!name) throw new Error('NAME_REQUIRED');
+        const result = roomManager.enqueueMatchmaking({
+          socketId: socket.id,
+          name,
+          mode: payload.mode
+        });
+        ackSafe(ack, { ok: true, queued: result.queued, mode: result.mode, position: result.position, waiting: result.waiting });
+        if (result.match) deliverMatch(result.match);
+        emitQueueStatuses();
+      } catch (error) {
+        fail(socket, error, ack);
+      }
+    });
+
+    socket.on('cancelQuickMatch', (_payload = {}, ack) => {
+      const removed = roomManager.removeFromMatchmaking(socket.id);
+      emitQueueStatuses();
+      ackSafe(ack, { ok: true, removed });
+    });
+
+    socket.on('playComputer', (payload = {}, ack) => {
+      try {
+        const existing = roomManager.bySocket(socket.id);
+        if (existing) roomManager.disconnect(socket.id);
+        roomManager.removeFromMatchmaking(socket.id);
+        const { room, player, token } = roomManager.createComputerGame({ socketId: socket.id, name: payload.name });
+        socket.join(room.id);
+        const snapshot = roomManager.publicRoom(room, player.id);
+        emitRoomState(room);
+        io.to(room.id).emit('gameEvent', {
+          type: 'GAME_STARTED', roomId: room.id, mode: room.mode, stateVersion: room.stateVersion, turnId: room.engine.state.turnId, at: Date.now(), vsComputer: true
+        });
+        scheduleNextAction(room);
+        ackSafe(ack, { ok: true, roomId: room.id, token, playerId: player.id, stateVersion: room.stateVersion, snapshot });
       } catch (error) {
         fail(socket, error, ack);
       }
@@ -381,6 +481,7 @@ export function registerSocketHandlers(io, roomManager) {
         socket.join(room.id);
         console.log(`[PLAYER JOINED] ${player.name} -> ${room.id}`);
         emitRoomState(room);
+        emitPublicRooms();
         if (room.status === 'PLAYING') {
           io.to(room.id).emit('gameEvent', {
             type: 'GAME_STARTED',
@@ -466,6 +567,7 @@ export function registerSocketHandlers(io, roomManager) {
         });
         console.log(`[GAME STARTED] ${room.id} with bots`);
         emitRoomState(room);
+        emitPublicRooms();
         scheduleNextAction(room);
         ackSafe(ack, { ok: true, stateVersion: room.stateVersion, turnId: room.engine.state.turnId });
       } catch (error) {
@@ -516,6 +618,8 @@ export function registerSocketHandlers(io, roomManager) {
 
     socket.on('disconnect', () => {
       const result = roomManager.disconnect(socket.id);
+      emitQueueStatuses();
+      emitPublicRooms();
       if (!result || result.deleted) return;
       const { room, player } = result;
       if (!room) return;

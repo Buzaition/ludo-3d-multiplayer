@@ -40,3 +40,43 @@ test('disconnect in a running game converts human to bot and resume restores hum
   assert.equal(first.player.type, 'HUMAN');
   assert.equal(first.player.connected, true);
 });
+
+test('quick matchmaking creates one room for every four waiting players', () => {
+  const manager = new RoomManager();
+  let result;
+  for (let i = 1; i <= 8; i++) {
+    result = manager.enqueueMatchmaking({ socketId:`q${i}`, name:`Q${i}`, mode:'CLASSIC' });
+    if (i % 4 === 0) assert.ok(result.match, `player ${i} should complete a match`);
+  }
+  assert.equal(manager.rooms.size, 2);
+  assert.equal(manager.queueStatus('CLASSIC').waiting, 0);
+  assert.ok([...manager.rooms.values()].every(room => room.status === 'PLAYING' && room.players.length === 4));
+});
+
+test('2v2 rooms assign opposite colors to the same team', () => {
+  const manager = new RoomManager();
+  let result;
+  for (let i = 1; i <= 4; i++) result = manager.enqueueMatchmaking({ socketId:`t${i}`, name:`T${i}`, mode:'TEAM_2V2' });
+  const room = result.match.room;
+  const teams = Object.fromEntries(room.players.map(player => [player.color, player.teamId]));
+  assert.equal(teams.RED, teams.YELLOW);
+  assert.equal(teams.GREEN, teams.BLUE);
+  assert.notEqual(teams.RED, teams.GREEN);
+  assert.equal(room.engine.state.mode, 'TEAM_2V2');
+});
+
+test('play with computer starts immediately with one human and three bots', () => {
+  const manager = new RoomManager();
+  const result = manager.createComputerGame({ socketId:'cpu1', name:'Human' });
+  assert.equal(result.room.status, 'PLAYING');
+  assert.equal(result.room.players.filter(player => player.type === 'BOT').length, 3);
+});
+
+test('public room list only exposes waiting public rooms', () => {
+  const manager = new RoomManager();
+  const publicRoom = manager.createRoom({ socketId:'pub1', name:'Public', visibility:'PUBLIC' });
+  manager.createRoom({ socketId:'priv1', name:'Private', visibility:'PRIVATE' });
+  const listed = manager.listPublicRooms();
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, publicRoom.room.id);
+});

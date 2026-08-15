@@ -82,6 +82,28 @@ const lobbyHint = document.querySelector('#lobbyHint');
 const loadingProgressBar = document.querySelector('#loadingProgressBar');
 const loadingProgressText = document.querySelector('#loadingProgressText');
 const loadingLabel = loading.querySelector('[data-loading-label]');
+const quickClassicBtn = document.querySelector('#quickClassicBtn');
+const quickTeamBtn = document.querySelector('#quickTeamBtn');
+const computerBtn = document.querySelector('#computerBtn');
+const createPublicRoomBtn = document.querySelector('#createPublicRoomBtn');
+const roomModeSelect = document.querySelector('#roomModeSelect');
+const publicRoomsList = document.querySelector('#publicRoomsList');
+const refreshPublicRoomsBtn = document.querySelector('#refreshPublicRoomsBtn');
+const matchmakingPanel = document.querySelector('#matchmakingPanel');
+const matchmakingTitle = document.querySelector('#matchmakingTitle');
+const matchmakingText = document.querySelector('#matchmakingText');
+const cancelMatchmakingBtn = document.querySelector('#cancelMatchmakingBtn');
+const lobbyMode = document.querySelector('#lobbyMode');
+const pointsStoreBtn = document.querySelector('#pointsStoreBtn');
+const pointsStoreSecondaryBtn = document.querySelector('#pointsStoreSecondaryBtn');
+const pointsDialog = document.querySelector('#pointsDialog');
+const closePointsBtn = document.querySelector('#closePointsBtn');
+const pointPackages = document.querySelector('#pointPackages');
+const paymentDemo = document.querySelector('#paymentDemo');
+const purchasePreview = document.querySelector('#purchasePreview');
+const purchaseIntentBtn = document.querySelector('#purchaseIntentBtn');
+const comingSoonPurchase = document.querySelector('#comingSoonPurchase');
+const finishPointsDemoBtn = document.querySelector('#finishPointsDemoBtn');
 
 // Scene
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false, powerPreference:'high-performance' });
@@ -144,11 +166,37 @@ let resumeInFlight = false;
 let initialCameraSet = false;
 let syncRequestInFlight = false;
 let lastEventIds = new Set();
+let matchmakingMode = null;
+let publicRooms = [];
+let selectedPointPackage = null;
+let selectedPaymentMethod = null;
+let pointsIntentCompleted = false;
 
 // Network
 const socket = window.io({ transports:['websocket','polling'] });
 const SESSION_KEY = 'ludo3d.multiplayer.session';
 const NAME_KEY = 'ludo3d.playerName';
+const ANALYTICS_VISITOR_KEY = 'ludo3d.analytics.visitor';
+const ANALYTICS_SESSION_KEY = 'ludo3d.analytics.session';
+function persistentRandomId(key) {
+  let value = localStorage.getItem(key);
+  if (!value) {
+    value = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(key, value);
+  }
+  return value;
+}
+const analyticsVisitorId = persistentRandomId(ANALYTICS_VISITOR_KEY);
+const analyticsSessionId = sessionStorage.getItem(ANALYTICS_SESSION_KEY) || (globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random()}`);
+sessionStorage.setItem(ANALYTICS_SESSION_KEY, analyticsSessionId);
+function trackAnalytics(event, extra = {}) {
+  fetch('/api/analytics/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    keepalive: true,
+    body: JSON.stringify({ event, visitorId: analyticsVisitorId, sessionId: analyticsSessionId, ...extra })
+  }).catch(() => {});
+}
 const savedName = localStorage.getItem(NAME_KEY);
 if (savedName) nameInput.value = savedName;
 const roomFromUrl = new URLSearchParams(location.search).get('room');
@@ -214,18 +262,48 @@ socket.on('connect', () => {
         acceptSnapshot(result.snapshot);
       }
     });
-  } else updateNetworkUI();
+  } else {
+    updateNetworkUI();
+    if (matchmakingMode && nameInput.value.trim()) {
+      socket.emit('quickMatch', { name:nameInput.value.trim(), mode:matchmakingMode }, result => {
+        if (result?.queued) matchmakingText.textContent = `رجعنا لقائمة الانتظار — ${result.waiting} / 4`;
+      });
+    }
+  }
 });
 
 socket.on('disconnect', () => {
   connectionText.textContent = 'Multiplayer • الاتصال انقطع…';
   connectionText.classList.add('connection-bad');
   rollPending = false;
+  if (matchmakingMode && matchmakingText) matchmakingText.textContent = 'الاتصال انقطع — هنرجعك لقائمة الانتظار تلقائيًا.';
   renderHUD();
 });
 
 socket.on('roomState', snapshot => {
   acceptSnapshot(snapshot);
+});
+
+socket.on('publicRooms', rooms => {
+  publicRooms = Array.isArray(rooms) ? rooms : [];
+  renderPublicRooms();
+});
+
+socket.on('matchmakingStatus', status => {
+  if (!matchmakingMode || status?.mode !== matchmakingMode) return;
+  matchmakingPanel.hidden = false;
+  matchmakingText.textContent = `في الانتظار ${status.waiting || 1} / 4 — فاضل ${Math.max(0, status.needed ?? 3)} لاعب`;
+});
+
+socket.on('matchFound', result => {
+  matchmakingMode = null;
+  matchmakingPanel.hidden = true;
+  if (result?.roomId && result?.token) {
+    saveSession({ roomId: result.roomId, token: result.token });
+    history.replaceState(null, '', `?room=${result.roomId}`);
+  }
+  if (result?.snapshot) acceptSnapshot(result.snapshot);
+  toast(result?.mode === 'TEAM_2V2' ? 'الماتش اتكوّن — 2 ضد 2 🔥' : 'لقينا 4 لاعبين — يلا بينا 🔥');
 });
 
 socket.on('resyncRequired', () => {
@@ -264,25 +342,35 @@ function emitWithAck(event, payload, onSuccess) {
   });
 }
 
-createRoomBtn.addEventListener('click', () => {
+function requirePlayerName() {
   const name = nameInput.value.trim();
-  if (!name) return toast('اكتب اسمك الأول.');
+  if (!name) { toast('اكتب اسمك الأول.'); return null; }
   saveName();
-  createRoomBtn.disabled = true;
-  emitWithAck('createRoom', { name }, result => {
-    createRoomBtn.disabled = false;
-    saveSession({ roomId:result.roomId, token:result.token });
+  return name;
+}
+
+function createRoomWithVisibility(visibility) {
+  const name = requirePlayerName();
+  if (!name) return;
+  const mode = roomModeSelect?.value || 'CLASSIC';
+  const button = visibility === 'PUBLIC' ? createPublicRoomBtn : createRoomBtn;
+  button.disabled = true;
+  emitWithAck('createRoom', { name, mode, visibility }, result => {
+    button.disabled = false;
+    saveSession({ roomId: result.roomId, token: result.token });
     history.replaceState(null, '', `?room=${result.roomId}`);
   });
-  setTimeout(() => { createRoomBtn.disabled = false; }, 1500);
-});
+  setTimeout(() => { button.disabled = false; }, 1500);
+}
+
+createRoomBtn.addEventListener('click', () => createRoomWithVisibility('PRIVATE'));
+createPublicRoomBtn?.addEventListener('click', () => createRoomWithVisibility('PUBLIC'));
 
 joinRoomBtn.addEventListener('click', () => {
-  const name = nameInput.value.trim();
+  const name = requirePlayerName();
   const roomId = roomCodeInput.value.trim().toUpperCase();
-  if (!name) return toast('اكتب اسمك الأول.');
+  if (!name) return;
   if (roomId.length < 4) return toast('اكتب كود الروم.');
-  saveName();
   joinRoomBtn.disabled = true;
   emitWithAck('joinRoom', { name, roomId }, result => {
     joinRoomBtn.disabled = false;
@@ -292,10 +380,77 @@ joinRoomBtn.addEventListener('click', () => {
   setTimeout(() => { joinRoomBtn.disabled = false; }, 1500);
 });
 
+function startQuickMatch(mode) {
+  const name = requirePlayerName();
+  if (!name || matchmakingMode) return;
+  matchmakingMode = mode;
+  matchmakingPanel.hidden = false;
+  matchmakingTitle.textContent = mode === 'TEAM_2V2' ? 'بندورلك على ماتش 2 ضد 2…' : 'بندورلك على 3 لاعبين…';
+  matchmakingText.textContent = 'دخلت قائمة الانتظار';
+  socket.emit('quickMatch', { name, mode }, result => {
+    if (!result?.ok) {
+      matchmakingMode = null;
+      matchmakingPanel.hidden = true;
+      return toast(errorMessage(result?.error?.code));
+    }
+    if (result.queued) matchmakingText.textContent = `ترتيبك في الانتظار: ${result.position} — الموجودين ${result.waiting} / 4`;
+  });
+}
+quickClassicBtn?.addEventListener('click', () => startQuickMatch('CLASSIC'));
+quickTeamBtn?.addEventListener('click', () => startQuickMatch('TEAM_2V2'));
+cancelMatchmakingBtn?.addEventListener('click', () => {
+  socket.emit('cancelQuickMatch', {}, () => {});
+  matchmakingMode = null;
+  matchmakingPanel.hidden = true;
+  toast('خرجت من قائمة الانتظار.');
+});
+
+computerBtn?.addEventListener('click', () => {
+  const name = requirePlayerName();
+  if (!name) return;
+  computerBtn.disabled = true;
+  socket.emit('playComputer', { name }, result => {
+    computerBtn.disabled = false;
+    if (!result?.ok) return toast(errorMessage(result?.error?.code));
+    saveSession({ roomId: result.roomId, token: result.token });
+    history.replaceState(null, '', `?room=${result.roomId}`);
+    if (result.snapshot) acceptSnapshot(result.snapshot);
+  });
+  setTimeout(() => { computerBtn.disabled = false; }, 1500);
+});
+
+function requestPublicRooms() {
+  if (!socket.connected) return;
+  socket.emit('listPublicRooms', {}, result => {
+    if (!result?.ok) return;
+    publicRooms = result.rooms || [];
+    renderPublicRooms();
+  });
+}
+
+function renderPublicRooms() {
+  if (!publicRoomsList) return;
+  if (!publicRooms.length) {
+    publicRoomsList.innerHTML = '<div class="public-empty">مفيش رومات عامة مستنية دلوقتي.<br>اعمل روم عام وخلي الناس تدخل.</div>';
+    return;
+  }
+  publicRoomsList.innerHTML = publicRooms.map(room => {
+    const modeLabel = room.mode === 'TEAM_2V2' ? '2 ضد 2' : 'فردي';
+    return `<div class="public-room-item"><div><strong>${escapeHtml(room.ownerName)} • ${room.id}</strong><small>${modeLabel} • ${room.players}/4 لاعبين</small></div><button type="button" data-public-room="${room.id}">دخول</button></div>`;
+  }).join('');
+  publicRoomsList.querySelectorAll('[data-public-room]').forEach(button => button.addEventListener('click', () => {
+    const name = requirePlayerName();
+    if (!name) return;
+    roomCodeInput.value = button.dataset.publicRoom;
+    joinRoomBtn.click();
+  }));
+}
+refreshPublicRoomsBtn?.addEventListener('click', requestPublicRooms);
+
 roomCodeInput.addEventListener('input', () => {
   roomCodeInput.value = roomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);
 });
-nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') createRoomBtn.click(); });
+nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') quickClassicBtn?.click(); });
 roomCodeInput.addEventListener('keydown', e => { if (e.key === 'Enter') joinRoomBtn.click(); });
 
 function roomShareUrl() {
@@ -380,11 +535,13 @@ function updateNetworkUI() {
     homeScreen.hidden = false;
     lobbyScreen.hidden = true;
     stopLobbyTimer();
+    requestPublicRooms();
     return;
   }
 
   if (waiting) {
     roomCodeDisplay.textContent = roomState.id;
+    if (lobbyMode) lobbyMode.textContent = roomState.mode === 'TEAM_2V2' ? 'غرفة 2 ضد 2' : (roomState.visibility === 'PUBLIC' ? 'غرفة عامة • فردي' : 'غرفة خاصة • فردي');
     if (lobbyCount) lobbyCount.textContent = `${roomState.players.length} / 4`;
     renderLobbyPlayers();
     startLobbyTimer();
@@ -401,7 +558,7 @@ function renderLobbyPlayers() {
     if (!player) return `<div class="lobby-slot empty">مكان فاضي</div>`;
     return `<div class="lobby-slot">
       <span class="slot-dot" style="background:${META[player.color].css}"></span>
-      <div><strong>${escapeHtml(player.name)}${player.isOwner ? ' 👑' : ''}</strong><small>${player.type === 'BOT' ? 'BOT 🤖' : 'PLAYER'}</small></div>
+      <div><strong>${escapeHtml(player.name)}${player.isOwner ? ' 👑' : ''}${player.teamId ? `<span class="lobby-team-badge">فريق ${player.teamId}</span>` : ''}</strong><small>${player.type === 'BOT' ? 'BOT 🤖' : 'PLAYER'}</small></div>
     </div>`;
   }).join('');
 }
@@ -428,6 +585,65 @@ function updateLobbyTimer() {
         ? 'بعد انتهاء الدقيقة تقدر تكمل الأماكن الفاضية ببوتات.'
         : 'صاحب الروم يقدر يكمل ببوتات بعد انتهاء وقت الانتظار.';
 }
+
+// Points Store validation demo — analytics only, no real payment.
+function resetPointsDemo() {
+  selectedPointPackage = null;
+  selectedPaymentMethod = null;
+  pointsIntentCompleted = false;
+  pointPackages?.querySelectorAll('.point-package').forEach(button => button.classList.remove('selected'));
+  document.querySelectorAll('[data-payment]').forEach(button => button.classList.remove('selected'));
+  if (paymentDemo) paymentDemo.hidden = true;
+  if (comingSoonPurchase) comingSoonPurchase.hidden = true;
+  if (purchaseIntentBtn) purchaseIntentBtn.disabled = true;
+  if (purchasePreview) purchasePreview.textContent = 'اختار طريقة الدفع علشان تكمل.';
+  if (pointPackages) pointPackages.hidden = false;
+}
+function openPointsStore() {
+  resetPointsDemo();
+  trackAnalytics('STORE_VIEW');
+  pointsDialog?.showModal();
+}
+pointsStoreBtn?.addEventListener('click', openPointsStore);
+pointsStoreSecondaryBtn?.addEventListener('click', openPointsStore);
+closePointsBtn?.addEventListener('click', () => {
+  if (selectedPointPackage && !pointsIntentCompleted) trackAnalytics('PURCHASE_CANCELLED', selectedPointPackage);
+  pointsDialog?.close();
+});
+pointsDialog?.addEventListener('click', event => {
+  if (event.target === pointsDialog) closePointsBtn?.click();
+});
+pointPackages?.querySelectorAll('.point-package').forEach(button => button.addEventListener('click', () => {
+  pointPackages.querySelectorAll('.point-package').forEach(item => item.classList.toggle('selected', item === button));
+  selectedPointPackage = {
+    packageId: button.dataset.package,
+    points: Number(button.dataset.points),
+    price: Number(button.dataset.price)
+  };
+  selectedPaymentMethod = null;
+  document.querySelectorAll('[data-payment]').forEach(item => item.classList.remove('selected'));
+  paymentDemo.hidden = false;
+  purchaseIntentBtn.disabled = true;
+  purchasePreview.textContent = `${selectedPointPackage.points.toLocaleString()} Points مقابل ${selectedPointPackage.price} EGP`;
+  trackAnalytics('PACKAGE_CLICK', selectedPointPackage);
+}));
+document.querySelectorAll('[data-payment]').forEach(button => button.addEventListener('click', () => {
+  if (!selectedPointPackage) return;
+  document.querySelectorAll('[data-payment]').forEach(item => item.classList.toggle('selected', item === button));
+  selectedPaymentMethod = button.dataset.payment;
+  purchaseIntentBtn.disabled = false;
+  purchasePreview.textContent = `مهتم بشراء ${selectedPointPackage.points.toLocaleString()} Points بـ ${selectedPointPackage.price} EGP عن طريق ${selectedPaymentMethod === 'vodafone_cash' ? 'Vodafone Cash' : 'InstaPay'}.`;
+  trackAnalytics('PAYMENT_METHOD_SELECTED', { ...selectedPointPackage, paymentMethod: selectedPaymentMethod });
+}));
+purchaseIntentBtn?.addEventListener('click', () => {
+  if (!selectedPointPackage || !selectedPaymentMethod) return;
+  pointsIntentCompleted = true;
+  trackAnalytics('PURCHASE_INTENT', { ...selectedPointPackage, paymentMethod: selectedPaymentMethod });
+  pointPackages.hidden = true;
+  paymentDemo.hidden = true;
+  comingSoonPurchase.hidden = false;
+});
+finishPointsDemoBtn?.addEventListener('click', () => pointsDialog?.close());
 
 // Recorded clips supplied by the user. Other SFX stay synthesized below.
 const RECORDED_SFX_PATHS = {
@@ -511,8 +727,15 @@ function handleGameEvent(event) {
     case 'PIECE_REACHED_HOME': playRecordedSfx('home',.95); toast('قطعة وصلت للبيت 🎉'); break;
     case 'EXACT_FINISH_WAIT': SFX.exactWait(); break;
     case 'PLAYER_FINISHED':
-      if(event.rank===1)SFX.victory();
-      if(event.rank<=3)toast(`المركز ${event.rank} اتحسم 🏆`);
+      if(roomState?.mode!=='TEAM_2V2'&&event.rank===1)SFX.victory();
+      if(roomState?.mode!=='TEAM_2V2'&&event.rank<=3)toast(`المركز ${event.rank} اتحسم 🏆`);
+      break;
+    case 'GAME_FINISHED':
+      if(roomState?.mode==='TEAM_2V2'){
+        const myTeam=roomState?.you?.teamId;
+        if(event.winningTeam===myTeam){SFX.victory();toast('فريقك كسب الماتش 🏆');}
+        else toast('الماتش خلص.');
+      }
       break;
     case 'PLAYER_DISCONNECTED_TO_BOT': playRecordedSfx('disconnect',.95); toast('لاعب فصل — البوت هيكمل مكانه 🤖'); break;
     case 'GAME_STARTED': toast('اللعبة بدأت! 🎲'); break;
@@ -616,11 +839,12 @@ function renderPlayers(){
   const currentId=roomState.game?.currentPlayerId;
   playersPanel.innerHTML=roomState.players.map(player=>{
     const finished=player.pieces?.filter(piece=>piece.finished).length||0;
-    const rank=player.finishedRank?['','🥇','🥈','🥉','4️⃣'][player.finishedRank]:'';
+    const rank=roomState.mode==='TEAM_2V2'?'':(player.finishedRank?['','🥇','🥈','🥉','4️⃣'][player.finishedRank]:'');
     const me=player.id===roomState.you?.playerId?' • إنت':'';
+    const team=roomState.mode==='TEAM_2V2'&&player.teamId?` • فريق ${player.teamId}`:'';
     return `<div class="player-card ${player.id===currentId?'active':''}">
       <span class="player-color" style="background:${META[player.color].css}"></span>
-      <div><strong>${escapeHtml(player.name)}${player.type==='BOT'?' 🤖':''}${me}</strong><small>${finished}/4 قطع وصلت</small></div><span class="player-rank">${rank}</span></div>`;
+      <div><strong>${escapeHtml(player.name)}${player.type==='BOT'?' 🤖':''}${me}</strong><small>${finished}/4 قطع وصلت${team}</small></div><span class="player-rank">${rank}</span></div>`;
   }).join('');
 }
 function renderPieceButtons(){
@@ -642,8 +866,13 @@ function renderHUD(){
   renderPlayers(); renderPieceButtons(); syncPieceHighlights();
 
   if(game.gameOver){
-    const names=game.rankings.map((id,i)=>`${['🥇','🥈','🥉','4️⃣'][i]} ${roomState.players.find(p=>p.id===id)?.name||'Player'}`).join(' • ');
-    statusText.textContent='انتهت اللعبة 🏆'; subStatus.textContent=names;
+    if (game.mode === 'TEAM_2V2' && game.winningTeam) {
+      const winners = roomState.players.filter(p => p.teamId === game.winningTeam).map(p => p.name).join(' + ');
+      statusText.textContent=`فريق ${game.winningTeam} كسب 🏆`; subStatus.textContent=winners;
+    } else {
+      const names=game.rankings.map((id,i)=>`${['🥇','🥈','🥉','4️⃣'][i]} ${roomState.players.find(p=>p.id===id)?.name||'Player'}`).join(' • ');
+      statusText.textContent='انتهت اللعبة 🏆'; subStatus.textContent=names;
+    }
   } else if(myTurn&&game.phase==='ROLL') { statusText.textContent=rollPending?'النرد بيلف…':'دورك — ارمي النرد'; subStatus.textContent='على الموبايل اضغط النرد الـ3D في نص البورد.'; }
   else if(myTurn&&game.phase==='MOVE') { statusText.textContent=`طلعت ${game.rolled}`; subStatus.textContent=game.legalPieceIds.length===1?'الحركة الوحيدة هتتنفذ تلقائيًا.':'اختار قطعة من البورد.'; }
   else { statusText.textContent=`دور ${current.name}`; subStatus.textContent=current.type==='BOT'?'البوت بيفكر…':'مستني اللاعب يرمي النرد.'; }
@@ -755,5 +984,5 @@ function animate(now){requestAnimationFrame(animate);updateMoveQueue(now);if(cam
 requestAnimationFrame(animate);
 
 function toast(message){toastEl.textContent=message;toastEl.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastEl.classList.remove('show'),1800);}
-function errorMessage(code){return ({ROOM_NOT_FOUND:'الروم مش موجودة.',ROOM_FULL:'الروم مكتملة.',GAME_ALREADY_STARTED:'اللعبة بدأت بالفعل.',NOT_ROOM_OWNER:'الزر ده لصاحب الروم فقط.',WAITING_TIME_NOT_FINISHED:'استنى لحد ما الدقيقة تخلص.',SESSION_NOT_FOUND:'الجلسة القديمة انتهت. ادخل الروم من جديد.',NOT_YOUR_TURN:'مش دورك.',ROLL_NOT_ALLOWED:'مش وقت رمي النرد.',MOVE_NOT_ALLOWED:'مش وقت تحريك قطعة.',INVALID_MOVE:'الحركة دي مش قانونية.',BLOCKADE_LANDING_FORBIDDEN:'الخانة مقفولة بتحصين مزدوج.',ACTION_IN_PROGRESS:'استنى الحركة الحالية تخلص.',STALE_ACTION:'الحالة اتغيرت — بنزامن اللعبة تلقائيًا.',ACTION_ID_REQUIRED:'تعذر تأكيد الحركة. جرّب مرة ثانية.'})[code]||'حصل خطأ. جرّب تاني.';}
+function errorMessage(code){return ({ROOM_NOT_FOUND:'الروم مش موجودة.',ROOM_FULL:'الروم مكتملة.',GAME_ALREADY_STARTED:'اللعبة بدأت بالفعل.',NOT_ROOM_OWNER:'الزر ده لصاحب الروم فقط.',WAITING_TIME_NOT_FINISHED:'استنى لحد ما الدقيقة تخلص.',SESSION_NOT_FOUND:'الجلسة القديمة انتهت. ادخل الروم من جديد.',NOT_YOUR_TURN:'مش دورك.',ROLL_NOT_ALLOWED:'مش وقت رمي النرد.',MOVE_NOT_ALLOWED:'مش وقت تحريك قطعة.',INVALID_MOVE:'الحركة دي مش قانونية.',BLOCKADE_LANDING_FORBIDDEN:'الخانة مقفولة بتحصين مزدوج.',ACTION_IN_PROGRESS:'استنى الحركة الحالية تخلص.',STALE_ACTION:'الحالة اتغيرت — بنزامن اللعبة تلقائيًا.',ACTION_ID_REQUIRED:'تعذر تأكيد الحركة. جرّب مرة ثانية.',ALREADY_IN_ROOM:'إنت بالفعل داخل روم.'})[code]||'حصل خطأ. جرّب تاني.';}
 function escapeHtml(value){return String(value??'').replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));}

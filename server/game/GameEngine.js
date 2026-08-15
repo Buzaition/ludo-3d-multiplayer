@@ -17,12 +17,14 @@ export class GameRuleError extends Error {
 }
 
 export class GameEngine {
-  constructor(players, { rng = Math.random } = {}) {
+  constructor(players, { rng = Math.random, mode = 'CLASSIC' } = {}) {
     if (!Array.isArray(players) || players.length !== 4) {
       throw new Error('GameEngine requires exactly 4 players.');
     }
     this.rng = rng;
     this.state = {
+      mode,
+      winningTeam: null,
       phase: 'ROLL',
       turnId: 1,
       currentPlayerId: players[0].id,
@@ -36,6 +38,7 @@ export class GameEngine {
         id: player.id,
         name: player.name,
         color: player.color,
+        teamId: player.teamId ?? null,
         type: player.type,
         connected: player.connected !== false,
         finishedRank: null,
@@ -85,6 +88,23 @@ export class GameEngine {
     return this.state.players.find(player => player.pieces.some(piece => piece.id === pieceId)) || null;
   }
 
+  areOpponents(pieceA, pieceB) {
+    if (!pieceA || !pieceB) return false;
+    const ownerA = this.ownerOfPiece(pieceA.id);
+    const ownerB = this.ownerOfPiece(pieceB.id);
+    if (!ownerA || !ownerB || ownerA.id === ownerB.id) return false;
+    if (this.state.mode === 'TEAM_2V2' && ownerA.teamId && ownerA.teamId === ownerB.teamId) return false;
+    return true;
+  }
+
+  isOpponentColor(movingColor, otherPiece) {
+    const movingPlayer = this.state.players.find(player => player.color === movingColor);
+    const otherPlayer = this.ownerOfPiece(otherPiece.id);
+    if (!movingPlayer || !otherPlayer || movingPlayer.id === otherPlayer.id) return false;
+    if (this.state.mode === 'TEAM_2V2' && movingPlayer.teamId && movingPlayer.teamId === otherPlayer.teamId) return false;
+    return true;
+  }
+
   occupantsAtCell(cell, excludePieceId = null) {
     const key = cellKey(cell);
     if (!key) return [];
@@ -102,7 +122,7 @@ export class GameEngine {
   hasEnemyBlockade(cell, movingColor, excludePieceId = null) {
     const counts = new Map();
     for (const piece of this.occupantsAtCell(cell, excludePieceId)) {
-      if (piece.color === movingColor || piece.progress >= FINISH_LANE_START_PROGRESS) continue;
+      if (!this.isOpponentColor(movingColor, piece) || piece.progress >= FINISH_LANE_START_PROGRESS) continue;
       counts.set(piece.color, (counts.get(piece.color) || 0) + 1);
       if (counts.get(piece.color) >= 2) return true;
     }
@@ -142,7 +162,7 @@ export class GameEngine {
     // Do not create an impossible multi-capture on a non-safe cell.
     if (target.progress <= MAIN_TRACK_LAST_PROGRESS && !SAFE_CELL_KEYS.has(cellKey(target.cell))) {
       const enemies = this.occupantsAtCell(target.cell, piece.id)
-        .filter(other => other.color !== piece.color);
+        .filter(other => this.areOpponents(piece, other));
       if (enemies.length > 1) return false;
     }
 
@@ -232,7 +252,7 @@ export class GameEngine {
     const target = steps.at(-1);
     const targetCell = target.cell;
     const enemies = target.progress <= MAIN_TRACK_LAST_PROGRESS
-      ? this.occupantsAtCell(targetCell, piece.id).filter(other => other.color !== piece.color)
+      ? this.occupantsAtCell(targetCell, piece.id).filter(other => this.areOpponents(piece, other))
       : [];
     const sameBefore = target.progress <= MAIN_TRACK_LAST_PROGRESS
       ? this.occupantsAtCell(targetCell, piece.id).filter(other => other.color === piece.color).length
@@ -314,7 +334,7 @@ export class GameEngine {
       !SAFE_CELL_KEYS.has(cellKey(targetCell))
     ) {
       const enemies = this.occupantsAtCell(targetCell, piece.id)
-        .filter(other => other.color !== piece.color);
+        .filter(other => this.areOpponents(piece, other));
       if (enemies.length === 1) {
         const enemy = enemies[0];
         enemy.progress = -1;
@@ -352,7 +372,20 @@ export class GameEngine {
         rank: player.finishedRank
       });
 
-      if (this.state.rankings.length === 3) {
+      if (this.state.mode === 'TEAM_2V2') {
+        const teamId = player.teamId;
+        const teamMembers = this.state.players.filter(candidate => candidate.teamId === teamId);
+        const teamFinished = teamMembers.length === 2 && teamMembers.every(member => member.pieces.every(pieceItem => pieceItem.finished));
+        if (teamFinished) {
+          this.state.winningTeam = teamId;
+          this.state.gameOver = true;
+          this.state.phase = 'DONE';
+          this.state.rolled = null;
+          this.state.finishedAt = Date.now();
+          events.push({ type: 'GAME_FINISHED', mode: this.state.mode, winningTeam: teamId, rankings: [...this.state.rankings] });
+          return { events, extraRoll: false };
+        }
+      } else if (this.state.rankings.length === 3) {
         const remaining = this.state.players.find(
           candidate => !this.state.rankings.includes(candidate.id)
         );
@@ -365,7 +398,7 @@ export class GameEngine {
         this.state.phase = 'DONE';
         this.state.rolled = null;
         this.state.finishedAt = Date.now();
-        events.push({ type: 'GAME_FINISHED', rankings: [...this.state.rankings] });
+        events.push({ type: 'GAME_FINISHED', mode: this.state.mode, rankings: [...this.state.rankings] });
         return { events, extraRoll: false };
       }
     }
@@ -399,7 +432,7 @@ export class GameEngine {
     ) return false;
     const next = cellForProgress(piece.color, piece.progress + 1);
     if (!next || SAFE_CELL_KEYS.has(cellKey(next))) return false;
-    const enemies = this.occupantsAtCell(next).filter(other => other.color !== piece.color);
+    const enemies = this.occupantsAtCell(next).filter(other => this.areOpponents(piece, other));
     return enemies.length === 1;
   }
 

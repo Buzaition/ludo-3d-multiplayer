@@ -82,19 +82,69 @@
     </div>
 
     <div id="networkOverlay" class="network-overlay" hidden>
-      <section id="homeScreen" class="network-card glass">
-        <div class="network-logo"><span class="brand-dot"></span> LUDO 3D</div>
-        <h1>العب مع صحابك</h1>
-        <p>اعمل روم أو ادخل بكود روم موجود.</p>
-        <label class="field-label" for="nameInput">اسمك</label>
-        <input id="nameInput" class="network-input" maxlength="24" autocomplete="nickname" placeholder="مثلاً Mostafa" />
-        <button id="createRoomBtn" class="primary-btn">إنشاء روم</button>
-        <div class="network-divider"><span>أو</span></div>
-        <div class="join-row">
-          <input id="roomCodeInput" class="network-input room-code-input" maxlength="6" autocomplete="off" placeholder="ROOM CODE" />
-          <button id="joinRoomBtn" class="ghost-btn">دخول</button>
+      <section id="homeScreen" class="network-card home-platform-card glass">
+        <div class="platform-hero">
+          <div>
+            <div class="network-logo"><span class="brand-dot"></span> LUDO 3D</div>
+            <h1>اختار طريقتك والعب فورًا</h1>
+            <p>ماتشات سريعة، 2 ضد 2، لعب مع الكمبيوتر، أو روم مع صحابك.</p>
+          </div>
+          <button id="pointsStoreBtn" class="wallet-pill" type="button"><span>🪙</span><strong id="demoBalance">1,250</strong><small>Points</small></button>
         </div>
-        <small class="network-hint">كل روم = 4 لاعبين. لو العدد ناقص بعد دقيقة، صاحب الروم يقدر يكمل ببوتات.</small>
+
+        <div class="home-name-row">
+          <label class="field-label" for="nameInput">اسم اللاعب</label>
+          <input id="nameInput" class="network-input" maxlength="24" autocomplete="nickname" placeholder="اكتب اسمك" />
+        </div>
+
+        <div class="mode-grid">
+          <button id="quickClassicBtn" class="mode-card mode-classic" type="button">
+            <span class="mode-icon">⚡</span><strong>لعب فردي</strong><small>4 لاعبين حقيقيين • اختيار عشوائي</small>
+          </button>
+          <button id="quickTeamBtn" class="mode-card mode-team" type="button">
+            <span class="mode-icon">🤝</span><strong>2 ضد 2</strong><small>فريقين • لاعبين حقيقيين</small>
+          </button>
+          <button id="computerBtn" class="mode-card mode-cpu" type="button">
+            <span class="mode-icon">🤖</span><strong>العب مع الكمبيوتر</strong><small>إنت + 3 بوتات • يبدأ فورًا</small>
+          </button>
+        </div>
+
+        <div id="matchmakingPanel" class="matchmaking-panel" hidden>
+          <div class="matchmaking-pulse"></div>
+          <div><strong id="matchmakingTitle">بندورلك على لاعبين…</strong><small id="matchmakingText">مستنيين باقي اللاعبين</small></div>
+          <button id="cancelMatchmakingBtn" class="ghost-btn compact" type="button">إلغاء</button>
+        </div>
+
+        <div class="home-sections-grid">
+          <section class="home-subcard">
+            <div class="subcard-head"><div><small>ROOMS</small><strong>روم خاص أو عام</strong></div></div>
+            <select id="roomModeSelect" class="network-input room-mode-select" aria-label="نوع الروم">
+              <option value="CLASSIC">فردي — 4 لاعبين</option>
+              <option value="TEAM_2V2">2 ضد 2</option>
+            </select>
+            <div class="room-create-row">
+              <button id="createRoomBtn" class="primary-btn">روم خاص</button>
+              <button id="createPublicRoomBtn" class="ghost-btn public-create-btn" type="button">روم عام</button>
+            </div>
+            <div class="network-divider"><span>أو ادخل بالكود</span></div>
+            <div class="join-row">
+              <input id="roomCodeInput" class="network-input room-code-input" maxlength="6" autocomplete="off" placeholder="ROOM CODE" />
+              <button id="joinRoomBtn" class="ghost-btn">دخول</button>
+            </div>
+          </section>
+
+          <section class="home-subcard public-room-section">
+            <div class="subcard-head">
+              <div><small>PUBLIC ROOMS</small><strong>رومات عامة</strong></div>
+              <button id="refreshPublicRoomsBtn" class="mini-icon-btn" type="button" aria-label="تحديث">↻</button>
+            </div>
+            <div id="publicRoomsList" class="public-rooms-list"><div class="public-empty">بندور على رومات متاحة…</div></div>
+          </section>
+        </div>
+
+        <button id="pointsStoreSecondaryBtn" class="points-demo-banner" type="button">
+          <span>🪙</span><div><strong>Points Store — Demo</strong><small>اختار باكدج وطريقة الدفع. مفيش دفع حقيقي دلوقتي.</small></div><b>فتح المتجر ←</b>
+        </button>
       </section>
 
       <section id="lobbyScreen" class="network-card lobby-card glass" hidden>
@@ -102,8 +152,8 @@
           <div class="lobby-heading">
             <span class="lobby-live-dot" aria-hidden="true"></span>
             <div>
-              <small>غرفة اللعب</small>
-              <h2>مستنيين أصحابك</h2>
+              <small id="lobbyMode">غرفة اللعب</small>
+              <h2>مستنيين اللاعبين</h2>
             </div>
           </div>
           <button id="leaveRoomBtn" class="ghost-btn compact danger-soft">خروج</button>
@@ -155,6 +205,33 @@
         <div class="loading-progress-meta"><small data-loading-label>جاري تحميل البورد ثلاثي الأبعاد</small><strong id="loadingProgressText">0%</strong></div>
       </div>
     </div>
+
+    <dialog id="pointsDialog" class="points-dialog">
+      <button class="dialog-close" id="closePointsBtn">×</button>
+      <div class="points-head">
+        <div><small>DEMO STORE</small><h2>اشتري Points</h2><p>دي تجربة لقياس اهتمام اللاعبين فقط — مفيش دفع حقيقي.</p></div>
+        <div class="points-balance"><span>🪙</span><strong>1,250</strong><small>رصيد تجريبي</small></div>
+      </div>
+      <div class="point-packages" id="pointPackages">
+        <button class="point-package" data-package="starter" data-points="500" data-price="10"><small>Starter</small><strong>500 🪙</strong><span>10 EGP</span></button>
+        <button class="point-package popular" data-package="popular" data-points="1200" data-price="20"><em>الأكثر اختيارًا</em><small>Popular</small><strong>1,200 🪙</strong><span>20 EGP</span></button>
+        <button class="point-package" data-package="pro" data-points="3500" data-price="50"><small>Pro</small><strong>3,500 🪙</strong><span>50 EGP</span></button>
+        <button class="point-package" data-package="king" data-points="8000" data-price="100"><small>King</small><strong>8,000 🪙</strong><span>100 EGP</span></button>
+      </div>
+      <div class="payment-demo" id="paymentDemo" hidden>
+        <h3>اختار طريقة الدفع</h3>
+        <div class="payment-buttons">
+          <button type="button" data-payment="vodafone_cash">📱 Vodafone Cash</button>
+          <button type="button" data-payment="instapay">💸 InstaPay</button>
+        </div>
+        <div id="purchasePreview" class="purchase-preview">اختار طريقة الدفع علشان تكمل.</div>
+        <button id="purchaseIntentBtn" class="primary-btn" type="button" disabled>متابعة</button>
+      </div>
+      <div id="comingSoonPurchase" class="coming-soon-purchase" hidden>
+        <span>🚀</span><h3>قريبًا</h3><p>إحنا بنقيس الاهتمام بالـPoints حاليًا. مش هيتم خصم أي فلوس.</p>
+        <button id="finishPointsDemoBtn" class="primary-btn" type="button">تمام</button>
+      </div>
+    </dialog>
 
     <dialog id="helpDialog" class="help-dialog">
       <button class="dialog-close" id="closeHelp">×</button>
