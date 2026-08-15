@@ -387,7 +387,7 @@ Input + 3D Rendering + Animation + Audio
 ## 1. Clone the repository
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
+git clone https://github.com/Buzaition/ludo-3d-multiplayer
 ```
 
 ## 2. Open the project
