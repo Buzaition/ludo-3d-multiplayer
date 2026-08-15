@@ -45,7 +45,7 @@ function mergeShape(input) {
 
 export class GithubAnalyticsStore {
   constructor(env = process.env) {
-    this.token = safeString(env.GITHUB_TOKEN, 500);
+    this.token = safeString(env.GITHUB_ANALYTICS_TOKEN || env.GITHUB_TOKEN || env.GH_TOKEN, 500);
     this.branch = safeString(env.GITHUB_BRANCH || 'main', 120);
     this.path = safeString(env.GITHUB_DATA_PATH || 'data/analytics.json', 300);
     this.owner = safeString(env.GITHUB_OWNER, 120);
@@ -55,7 +55,7 @@ export class GithubAnalyticsStore {
         ? `https://api.github.com/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/contents/${this.path.split('/').map(encodeURIComponent).join('/')}`
         : ''
     );
-    this.flushMs = Math.max(15_000, Number(env.ANALYTICS_FLUSH_MS || 45_000));
+    this.flushMs = Math.max(5_000, Number(env.ANALYTICS_FLUSH_MS || 30_000));
     this.data = emptyData();
     this.sha = null;
     this.loaded = false;
@@ -64,6 +64,9 @@ export class GithubAnalyticsStore {
     this.unflushedEvents = [];
     this.writeQueue = Promise.resolve();
     this.timer = null;
+    this.flushSoonTimer = null;
+    this.lastError = null;
+    this.lastFlushAt = null;
   }
 
   get persistenceMode() {
@@ -75,19 +78,21 @@ export class GithubAnalyticsStore {
       try {
         await this.#loadRemote();
       } catch (error) {
-        console.warn('[ANALYTICS] GitHub load failed, using memory until next flush:', error.message);
+        this.lastError = error.message;
+        console.warn('[ANALYTICS] GitHub load failed, keeping events in memory until GitHub becomes writable:', error.message);
       }
     }
     this.loaded = true;
     if (this.pending.length) {
       const queued = this.pending.splice(0);
       queued.forEach(event => this.#apply(event));
+      if (this.dirty) this.#scheduleFlush(2500);
     }
     this.timer = setInterval(() => this.flush().catch(error => {
       console.warn('[ANALYTICS] Flush failed:', error.message);
     }), this.flushMs);
     this.timer.unref?.();
-    console.log(`[ANALYTICS] persistence=${this.persistenceMode}`);
+    console.log(`[ANALYTICS] persistence=${this.persistenceMode}${this.owner && this.repo ? ` repo=${this.owner}/${this.repo} path=${this.path}` : ''}`);
   }
 
   record(raw = {}) {
@@ -105,6 +110,7 @@ export class GithubAnalyticsStore {
     };
     if (!this.loaded) this.pending.push(entry);
     else this.#apply(entry);
+    if (this.loaded && this.persistenceMode === 'github') this.#scheduleFlush(event === 'PURCHASE_INTENT' ? 1200 : 6000);
     return true;
   }
 
@@ -113,6 +119,9 @@ export class GithubAnalyticsStore {
     const intents = this.data.totals.PURCHASE_INTENT || 0;
     return {
       persistence: this.persistenceMode,
+      persistenceError: this.lastError,
+      lastFlushAt: this.lastFlushAt,
+      dirty: this.dirty,
       updatedAt: this.data.updatedAt,
       uniqueVisitors: this.data.uniqueVisitorIds.length,
       totals: { ...this.data.totals },
@@ -125,15 +134,46 @@ export class GithubAnalyticsStore {
 
   async flush() {
     if (!this.dirty || this.persistenceMode !== 'github') return false;
-    this.writeQueue = this.writeQueue.then(() => this.#flushOnce(), () => this.#flushOnce());
-    return this.writeQueue;
+    const run = this.writeQueue.then(() => this.#flushOnce(), () => this.#flushOnce());
+    this.writeQueue = run.catch(() => undefined);
+    try {
+      const result = await run;
+      this.lastError = null;
+      return result;
+    } catch (error) {
+      this.lastError = error.message;
+      throw error;
+    }
+  }
+
+  status() {
+    return {
+      persistence: this.persistenceMode,
+      owner: this.owner || null,
+      repo: this.repo || null,
+      path: this.path || null,
+      branch: this.branch || null,
+      dirty: this.dirty,
+      lastFlushAt: this.lastFlushAt,
+      lastError: this.lastError
+    };
   }
 
   async close() {
     clearInterval(this.timer);
+    clearTimeout(this.flushSoonTimer);
     if (this.dirty) {
       try { await this.flush(); } catch {}
     }
+  }
+
+  #scheduleFlush(delay = 6000) {
+    if (this.persistenceMode !== 'github' || this.flushSoonTimer) return;
+    this.flushSoonTimer = setTimeout(() => {
+      this.flushSoonTimer = null;
+      this.flush().catch(error => console.warn('[ANALYTICS] Flush failed:', error.message));
+    }, Math.max(750, delay));
+    this.flushSoonTimer.unref?.();
   }
 
   #apply(entry, { track = true } = {}) {
@@ -165,6 +205,7 @@ export class GithubAnalyticsStore {
     this.sha = payload.sha || null;
     const decoded = Buffer.from(payload.content || '', 'base64').toString('utf8');
     this.data = mergeShape(JSON.parse(decoded || '{}'));
+    this.lastError = null;
   }
 
   async #flushOnce(retry = true) {
@@ -198,6 +239,8 @@ export class GithubAnalyticsStore {
     this.sha = payload.content?.sha || this.sha;
     this.dirty = false;
     this.unflushedEvents = [];
+    this.lastFlushAt = new Date().toISOString();
+    this.lastError = null;
     return true;
   }
 

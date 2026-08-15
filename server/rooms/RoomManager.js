@@ -254,6 +254,17 @@ export class RoomManager {
     return { room, player };
   }
 
+
+  leaveRoom(socketId) {
+    const result = this.disconnect(socketId);
+    if (result?.player) {
+      // An explicit exit is intentional, so this browser should not reclaim the seat
+      // with an old saved token. If the game is running the bot keeps the seat.
+      result.player.token = randomToken();
+    }
+    return result;
+  }
+
   deleteRoom(roomId) {
     const room = this.rooms.get(roomId);
     if (!room) return false;

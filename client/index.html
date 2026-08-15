@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0d1015" />
+  <link rel="icon" type="image/svg+xml" href="./assets/dice-favicon.svg" />
+  <link rel="apple-touch-icon" href="./assets/dice-favicon.svg" />
   <title>Ludo 3D — Multiplayer</title>
   <link rel="stylesheet" href="./styles.css" />
   <script type="importmap">
@@ -21,13 +23,16 @@
 
     <header class="topbar glass">
       <div class="brand">
-        <span class="brand-dot"></span>
+        <img class="brand-dice" src="./assets/dice-favicon.svg" alt="" aria-hidden="true" />
         <div>
           <strong>LUDO 3D</strong>
           <small id="connectionText">Multiplayer • جاري الاتصال…</small>
         </div>
       </div>
       <div class="top-actions">
+        <button id="roomExitBtn" class="icon-btn exit-room-icon" type="button" hidden aria-label="الخروج من الروم" title="الخروج من الروم">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4M18 12H9"/></svg>
+        </button>
         <button id="playAgainBtn" class="ghost-btn" hidden>العب تاني</button>
         <button id="helpBtn" class="ghost-btn">طريقة اللعب</button>
       </div>
@@ -83,9 +88,13 @@
 
     <div id="networkOverlay" class="network-overlay" hidden>
       <section id="homeScreen" class="network-card home-platform-card glass">
+        <div class="mobile-home-toolbar">
+          <div class="network-logo"><img class="brand-dice" src="./assets/dice-favicon.svg" alt="" aria-hidden="true" /> LUDO 3D</div>
+          <button id="mobileHelpBtn" class="ghost-btn" type="button">طريقة اللعب</button>
+        </div>
         <div class="platform-hero">
           <div>
-            <div class="network-logo"><span class="brand-dot"></span> LUDO 3D</div>
+            <div class="network-logo"><img class="brand-dice" src="./assets/dice-favicon.svg" alt="" aria-hidden="true" /> LUDO 3D</div>
             <h1>اختار طريقتك والعب فورًا</h1>
             <p>ماتشات سريعة، 2 ضد 2، لعب مع الكمبيوتر، أو روم مع صحابك.</p>
           </div>
@@ -156,7 +165,9 @@
               <h2>مستنيين اللاعبين</h2>
             </div>
           </div>
-          <button id="leaveRoomBtn" class="ghost-btn compact danger-soft">خروج</button>
+          <button id="leaveRoomBtn" class="icon-btn exit-room-icon lobby-exit-icon" type="button" aria-label="الخروج من الروم" title="الخروج من الروم">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4M18 12H9"/></svg>
+          </button>
         </div>
 
         <div class="room-share-card">
@@ -231,6 +242,31 @@
         <span>🚀</span><h3>قريبًا</h3><p>إحنا بنقيس الاهتمام بالـPoints حاليًا. مش هيتم خصم أي فلوس.</p>
         <button id="finishPointsDemoBtn" class="primary-btn" type="button">تمام</button>
       </div>
+    </dialog>
+
+
+    <dialog id="exitDialog" class="action-dialog">
+      <button class="dialog-close" id="closeExitDialog" type="button">×</button>
+      <div class="action-dialog-icon danger">↪</div>
+      <h2>تخرج من الروم؟</h2>
+      <p id="exitDialogText">لو خرجت أثناء الماتش، البوت هيكمل مكانك علشان اللعبة ماتقفش.</p>
+      <div class="action-dialog-actions">
+        <button id="confirmExitBtn" class="danger-btn" type="button">أيوه، اخرج</button>
+        <button id="cancelExitBtn" class="ghost-btn" type="button">إلغاء</button>
+      </div>
+    </dialog>
+
+    <dialog id="gameOverDialog" class="action-dialog game-over-dialog">
+      <div class="action-dialog-icon trophy">🏆</div>
+      <small class="game-over-kicker">GAME FINISHED</small>
+      <h2 id="gameOverTitle">الماتش خلص</h2>
+      <p id="gameOverSummary">اختار هتعمل إيه بعد الماتش.</p>
+      <div class="action-dialog-actions stacked">
+        <button id="gameOverRematchBtn" class="primary-btn" type="button">🎲 العب تاني في نفس الروم</button>
+        <button id="gameOverNewGameBtn" class="ghost-btn" type="button">✨ اختار نوع لعبة جديد</button>
+        <button id="gameOverHomeBtn" class="ghost-btn danger-soft" type="button">⌂ ارجع للرئيسية</button>
+      </div>
+      <small id="gameOverHint" class="action-dialog-hint"></small>
     </dialog>
 
     <dialog id="helpDialog" class="help-dialog">

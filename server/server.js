@@ -37,11 +37,25 @@ app.post('/api/analytics/event', (req, res) => {
   res.status(202).json({ ok: true });
 });
 
-app.get('/api/analytics/summary', (req, res) => {
+function analyticsAdminAllowed(req) {
   const adminKey = String(process.env.ADMIN_KEY || '').trim();
   const provided = String(req.get('x-admin-key') || req.query.key || '').trim();
-  if (adminKey && provided !== adminKey) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
+  return !adminKey || provided === adminKey;
+}
+
+app.get('/api/analytics/summary', (req, res) => {
+  if (!analyticsAdminAllowed(req)) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
   res.json({ ok: true, ...analytics.summary() });
+});
+
+app.post('/api/analytics/flush', async (req, res) => {
+  if (!analyticsAdminAllowed(req)) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
+  try {
+    const flushed = await analytics.flush();
+    res.json({ ok: true, flushed, ...analytics.status() });
+  } catch (error) {
+    res.status(502).json({ ok: false, error: 'GITHUB_ANALYTICS_FLUSH_FAILED', message: error.message, ...analytics.status() });
+  }
 });
 
 app.get('/health', (_req, res) => {
@@ -57,7 +71,8 @@ app.get('/health', (_req, res) => {
       classic: roomManager.queueStatus('CLASSIC').waiting,
       team2v2: roomManager.queueStatus('TEAM_2V2').waiting
     },
-    analyticsPersistence: analytics.persistenceMode
+    analyticsPersistence: analytics.persistenceMode,
+    analytics: analytics.status()
   });
 });
 

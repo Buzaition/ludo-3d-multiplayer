@@ -576,6 +576,36 @@ export function registerSocketHandlers(io, roomManager) {
       }
     });
 
+
+    socket.on('leaveRoom', (_payload = {}, ack) => {
+      try {
+        const ref = roomManager.bySocket(socket.id);
+        if (!ref) throw roomManager.error('SESSION_NOT_FOUND');
+        const roomId = ref.room.id;
+        const result = roomManager.leaveRoom(socket.id);
+        socket.leave(roomId);
+        emitQueueStatuses();
+        emitPublicRooms();
+        if (result?.room && !result.deleted) {
+          if (result.convertedToBot) {
+            io.to(roomId).emit('gameEvent', {
+              type: 'PLAYER_LEFT_TO_BOT',
+              playerId: result.player.id,
+              roomId,
+              stateVersion: result.room.stateVersion,
+              turnId: result.room.engine?.state?.turnId ?? null,
+              at: Date.now()
+            });
+          }
+          emitRoomState(result.room);
+          scheduleNextAction(result.room);
+        }
+        ackSafe(ack, { ok: true, roomId });
+      } catch (error) {
+        fail(socket, error, ack);
+      }
+    });
+
     socket.on('rollDice', (payload = {}, ack) => {
       const ref = roomManager.bySocket(socket.id);
       if (!ref) return fail(socket, roomManager.error('SESSION_NOT_FOUND'), ack);

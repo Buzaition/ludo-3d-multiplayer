@@ -1,6 +1,6 @@
 {
   "name": "ludo-3d-multiplayer",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "description": "Realtime 3D Ludo platform with matchmaking, public rooms, 2v2, bots and points validation analytics",

@@ -80,3 +80,18 @@ test('public room list only exposes waiting public rooms', () => {
   assert.equal(listed.length, 1);
   assert.equal(listed[0].id, publicRoom.room.id);
 });
+
+test('explicit leave during a running game releases the socket and leaves a bot in the seat', () => {
+  const manager = new RoomManager();
+  const first = manager.createRoom({ socketId:'leave1', name:'One' });
+  manager.joinRoom({ roomId:first.room.id, socketId:'leave2', name:'Two' });
+  manager.joinRoom({ roomId:first.room.id, socketId:'leave3', name:'Three' });
+  manager.joinRoom({ roomId:first.room.id, socketId:'leave4', name:'Four' });
+  const oldToken = first.player.token;
+  const result = manager.leaveRoom('leave1');
+  assert.equal(result.convertedToBot, true);
+  assert.equal(first.player.type, 'BOT');
+  assert.equal(first.player.connected, false);
+  assert.notEqual(first.player.token, oldToken);
+  assert.equal(manager.bySocket('leave1'), null);
+});

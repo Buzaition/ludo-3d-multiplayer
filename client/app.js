@@ -48,6 +48,7 @@ const canvas = document.querySelector('#gameCanvas');
 const loading = document.querySelector('#loading');
 const rollBtn = document.querySelector('#rollBtn');
 const playAgainBtn = document.querySelector('#playAgainBtn');
+const roomExitBtn = document.querySelector('#roomExitBtn');
 const playersPanel = document.querySelector('#playersPanel');
 const pieceButtons = document.querySelector('#pieceButtons');
 const turnName = document.querySelector('#turnName');
@@ -59,6 +60,7 @@ const autoCamera = document.querySelector('#autoCamera');
 const cameraButtons = [...document.querySelectorAll('[data-view]')];
 const helpDialog = document.querySelector('#helpDialog');
 const helpBtn = document.querySelector('#helpBtn');
+const mobileHelpBtn = document.querySelector('#mobileHelpBtn');
 const closeHelp = document.querySelector('#closeHelp');
 const toastEl = document.querySelector('#toast');
 const connectionText = document.querySelector('#connectionText');
@@ -104,6 +106,18 @@ const purchasePreview = document.querySelector('#purchasePreview');
 const purchaseIntentBtn = document.querySelector('#purchaseIntentBtn');
 const comingSoonPurchase = document.querySelector('#comingSoonPurchase');
 const finishPointsDemoBtn = document.querySelector('#finishPointsDemoBtn');
+const exitDialog = document.querySelector('#exitDialog');
+const closeExitDialog = document.querySelector('#closeExitDialog');
+const cancelExitBtn = document.querySelector('#cancelExitBtn');
+const confirmExitBtn = document.querySelector('#confirmExitBtn');
+const exitDialogText = document.querySelector('#exitDialogText');
+const gameOverDialog = document.querySelector('#gameOverDialog');
+const gameOverTitle = document.querySelector('#gameOverTitle');
+const gameOverSummary = document.querySelector('#gameOverSummary');
+const gameOverRematchBtn = document.querySelector('#gameOverRematchBtn');
+const gameOverNewGameBtn = document.querySelector('#gameOverNewGameBtn');
+const gameOverHomeBtn = document.querySelector('#gameOverHomeBtn');
+const gameOverHint = document.querySelector('#gameOverHint');
 
 // Scene
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false, powerPreference:'high-performance' });
@@ -171,6 +185,8 @@ let publicRooms = [];
 let selectedPointPackage = null;
 let selectedPaymentMethod = null;
 let pointsIntentCompleted = false;
+let lastGameOverDialogKey = null;
+let exitInFlight = false;
 
 // Network
 const socket = window.io({ transports:['websocket','polling'] });
@@ -508,23 +524,106 @@ fillBotsBtn.addEventListener('click', () => {
   setTimeout(() => updateLobbyTimer(), 1000);
 });
 
-leaveRoomBtn.addEventListener('click', () => {
-  clearSession();
-  socket.disconnect();
-  history.replaceState(null, '', location.pathname);
-  location.reload();
-});
+function openExitConfirmation() {
+  if (!roomState || exitInFlight) return;
+  const duringGame = roomState.status === 'PLAYING';
+  exitDialogText.textContent = duringGame
+    ? 'لو خرجت أثناء الماتش، البوت هيكمل مكانك علشان اللعبة ماتقفش. متأكد إنك عايز تخرج؟'
+    : 'متأكد إنك عايز تخرج من الروم وترجع للصفحة الرئيسية؟';
+  exitDialog?.showModal();
+}
 
-playAgainBtn.addEventListener('click', () => {
+function resetToHome() {
+  clearSession();
+  roomState = null;
+  appliedRoomState = null;
+  lastGameOverDialogKey = null;
+  matchmakingMode = null;
+  history.replaceState(null, '', location.pathname);
+  gameOverDialog?.close();
+  exitDialog?.close();
+  updateNetworkUI();
+  window.setTimeout(() => document.querySelector('#networkOverlay')?.scrollTo?.({ top:0, behavior:'smooth' }), 0);
+}
+
+function leaveCurrentRoom({ afterLeave = null } = {}) {
+  if (!roomState || exitInFlight) { afterLeave?.(); return; }
+  exitInFlight = true;
+  confirmExitBtn.disabled = true;
+  socket.emit('leaveRoom', {}, result => {
+    exitInFlight = false;
+    confirmExitBtn.disabled = false;
+    if (!result?.ok) {
+      toast(errorMessage(result?.error?.code));
+      return;
+    }
+    resetToHome();
+    afterLeave?.();
+  });
+  setTimeout(() => {
+    if (!exitInFlight) return;
+    exitInFlight = false;
+    confirmExitBtn.disabled = false;
+    toast('الخروج أخد وقت أطول من المتوقع. جرّب تاني.');
+  }, 5000);
+}
+
+leaveRoomBtn.addEventListener('click', openExitConfirmation);
+roomExitBtn?.addEventListener('click', openExitConfirmation);
+closeExitDialog?.addEventListener('click', () => exitDialog?.close());
+cancelExitBtn?.addEventListener('click', () => exitDialog?.close());
+exitDialog?.addEventListener('click', event => { if (event.target === exitDialog) exitDialog.close(); });
+confirmExitBtn?.addEventListener('click', () => leaveCurrentRoom());
+
+function requestRematch() {
+  if (!roomState || roomState.status !== 'FINISHED') return;
+  if (!roomState.you?.isOwner) {
+    gameOverHint.textContent = 'مستني صاحب الروم يبدأ الريماتش. تقدر ترجع للرئيسية وتختار مود جديد.';
+    return;
+  }
   playAgainBtn.disabled = true;
-  emitWithAck('playAgain', { expectedVersion: roomState?.stateVersion ?? 0 }, () => { playAgainBtn.disabled = false; });
-  setTimeout(() => { playAgainBtn.disabled = false; }, 1500);
-});
+  gameOverRematchBtn.disabled = true;
+  emitWithAck('playAgain', { expectedVersion: roomState?.stateVersion ?? 0 }, () => {
+    playAgainBtn.disabled = false;
+    gameOverRematchBtn.disabled = false;
+    gameOverDialog?.close();
+  });
+  setTimeout(() => { playAgainBtn.disabled = false; gameOverRematchBtn.disabled = false; }, 1500);
+}
+
+playAgainBtn.addEventListener('click', requestRematch);
+gameOverRematchBtn?.addEventListener('click', requestRematch);
+gameOverHomeBtn?.addEventListener('click', () => leaveCurrentRoom());
+gameOverNewGameBtn?.addEventListener('click', () => leaveCurrentRoom());
+
+function showGameOverDialog() {
+  if (!roomState || roomState.status !== 'FINISHED') return;
+  const key = `${roomState.id}:${roomState.stateVersion}`;
+  if (lastGameOverDialogKey === key && gameOverDialog?.open) return;
+  lastGameOverDialogKey = key;
+  const me = yourPlayer(roomState);
+  if (roomState.mode === 'TEAM_2V2') {
+    const winner = roomState.game?.winningTeam;
+    gameOverTitle.textContent = winner && me?.teamId === winner ? 'فريقك كسب! 🏆' : 'الماتش خلص';
+    gameOverSummary.textContent = winner ? `الفريق ${winner} كسب الماتش. تقدروا تعملوا ريماتش في نفس الروم أو تبدأ لعبة جديدة.` : 'الماتش خلص. تقدر تعمل ريماتش أو تبدأ لعبة جديدة.';
+  } else {
+    const rank = me?.finishedRank;
+    gameOverTitle.textContent = rank === 1 ? 'كسبت الماتش! 🏆' : 'الماتش خلص';
+    gameOverSummary.textContent = rank ? `ترتيبك: المركز ${rank}. تقدر تلعبوا تاني في نفس الروم أو تختار مود جديد.` : 'النتيجة اتحسمت. تقدر تلعبوا تاني في نفس الروم أو تختار مود جديد.';
+  }
+  gameOverRematchBtn.hidden = !roomState.you?.isOwner;
+  gameOverHint.textContent = roomState.you?.isOwner
+    ? 'إنت صاحب الروم، فريماتش نفس الروم هيبدأ لكل الموجودين.'
+    : 'الريماتش في نفس الروم يبدأه صاحب الروم. إنت تقدر ترجع للرئيسية في أي وقت.';
+  if (!gameOverDialog.open) gameOverDialog.showModal();
+}
+
 
 function updateNetworkUI() {
   if (!modelReady) return;
   const waiting = roomState?.status === 'WAITING';
   const playing = roomState?.status === 'PLAYING' || roomState?.status === 'FINISHED';
+  if (roomExitBtn) roomExitBtn.hidden = !roomState;
   document.body.classList.toggle('not-playing', !playing);
   networkOverlay.hidden = playing;
   homeScreen.hidden = !!roomState;
@@ -535,6 +634,7 @@ function updateNetworkUI() {
     homeScreen.hidden = false;
     lobbyScreen.hidden = true;
     stopLobbyTimer();
+    gameOverDialog?.close();
     requestPublicRooms();
     return;
   }
@@ -548,6 +648,8 @@ function updateNetworkUI() {
   } else stopLobbyTimer();
 
   playAgainBtn.hidden = !(roomState.status === 'FINISHED' && roomState.you?.isOwner);
+  if (roomState.status === 'FINISHED') queueMicrotask(showGameOverDialog);
+  else if (gameOverDialog?.open) gameOverDialog.close();
 }
 
 function renderLobbyPlayers() {
@@ -647,7 +749,6 @@ finishPointsDemoBtn?.addEventListener('click', () => pointsDialog?.close());
 
 // Recorded clips supplied by the user. Other SFX stay synthesized below.
 const RECORDED_SFX_PATHS = {
-  six: './assets/audio/six.mp3',
   capture: './assets/audio/capture.wav',
   disconnect: './assets/audio/player-disconnected.mp3',
   home: './assets/audio/piece-home.mp3',
@@ -716,7 +817,7 @@ function handleGameEvent(event) {
     case 'DICE_ROLL_STARTED':
       SFX.diceRoll(); startDiceRolling(); if(event.playerId===roomState?.you?.playerId) rollPending=true; break;
     case 'DICE_ROLLED':
-      setDiceValue(event.value); orientDiceToValue(event.value); rollPending=false; if(event.value===6&&!event.penalized)playRecordedSfx('six',.95); break;
+      setDiceValue(event.value); orientDiceToValue(event.value); rollPending=false; break;
     case 'TRIPLE_SIX_PENALTY': SFX.tripleSix(); toast('3 ستات متتالية — الرمية الثالثة اتلغت'); break;
     case 'PIECE_LEFT_BASE': playRecordedSfx('pieceOut',.95); break;
     case 'PIECE_ENTERED_SAFE_CELL': SFX.safe(); break;
@@ -976,7 +1077,7 @@ function setPlayerView(color,immediate=false){
 }
 autoCamera.addEventListener('change',()=>{if(autoCamera.checked&&roomState?.you?.color)setPlayerView(roomState.you.color);});
 cameraButtons.forEach(btn=>btn.addEventListener('click',()=>setPlayerView(btn.dataset.view)));
-helpBtn.addEventListener('click',()=>helpDialog.showModal()); closeHelp.addEventListener('click',()=>helpDialog.close()); helpDialog.addEventListener('click',e=>{if(e.target===helpDialog)helpDialog.close();});
+helpBtn.addEventListener('click',()=>helpDialog.showModal()); mobileHelpBtn?.addEventListener('click',()=>helpDialog.showModal()); closeHelp.addEventListener('click',()=>helpDialog.close()); helpDialog.addEventListener('click',e=>{if(e.target===helpDialog)helpDialog.close();});
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));if(autoCamera.checked&&roomState?.you?.color)setPlayerView(roomState.you.color,true);});
 
 function updateMoveQueue(now){for(let i=moveQueue.length-1;i>=0;i--){const m=moveQueue[i],t=Math.min(1,(now-m.startTime)/m.duration),smooth=t*t*(3-2*t),world=m.start.clone().lerp(m.end,smooth);world.y+=Math.sin(Math.PI*t)*.22;moveObjectWorld(m.root,world);if(t>=1){moveObjectWorld(m.root,m.end);moveQueue.splice(i,1);m.resolve();}}}
